@@ -76,6 +76,29 @@ must("employer, employed", "Employed at Voss Precision Tooling.", ["Voss", "Prec
 must("relationship, sentence-initial", "Wife Susan was at bedside.", ["Susan"]);
 must("relationship, daughter", "Daughter Rebecca provides transport.", ["Rebecca"]);
 
+console.log("\n── geography below state level ──");
+// Both found by running the project's OWN sample record through the app and
+// reading the review panel, not by reading this file. The sample's address
+// block is "Cleveland, 44113" — city straight onto a ZIP, no state — so the
+// city+state rule never fired, the ZIP was redacted beside it, and the panel
+// looked like the address had been handled.
+must("city with ZIP and no state", "Cleveland, 44113", ["Cleveland"]);
+must("city with ZIP+4 and no state", "Cleveland, 44113-2201", ["Cleveland"]);
+must("address block from the sample record",
+  "Address: 1184 Birchwood Avenue, Apt 12C\nCleveland, 44113",
+  ["Birchwood", "Cleveland", "44113"]);
+// A spelled-out state left BOTH halves in place: the alternation held
+// abbreviations only, so "Cleveland, OH" was caught and "Cleveland, Ohio" was not.
+must("city with a spelled-out state", "Cleveland, Ohio 44106", ["Cleveland", "Ohio"]);
+must("two-word spelled-out state", "Charleston, West Virginia 25301", ["Charleston", "West Virginia"]);
+must("city with abbreviation still works", "Cleveland, OH 44106", ["Cleveland", "44106"]);
+// The wider state list must not start eating clinical text that merely
+// contains a state name.
+must("state name inside a clinical term",
+  "New York Heart Association class II heart failure.", [], ["New York Heart Association"]);
+must("state name inside a source", "Washington Manual guidance followed.", [], ["Washington Manual"]);
+must("comma before a big number", "Cycle 3, 45000 platelets noted.", [], ["45000"]);
+
 console.log("\n── labelled fields must not eat the rest of the line ──");
 must("name field beside clinical text",
   "Physician: Dr. Chen. Patient has Stage IV NSCLC with EGFR Exon 19 deletion.",

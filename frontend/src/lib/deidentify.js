@@ -67,8 +67,15 @@ const RECORD_LABELS =
 const DEPARTMENTS =
   "Radiation|Medical|Surgical|Clinical|Gynecologic|Gynaecologic|Pediatric|Paediatric|Thoracic|Neuro|Ortho|Orthopedic|Orthopaedic|Cardiac|Hematologic|Haematologic|Radiation";
 
+// Abbreviations FIRST, then the names spelled out. A chart writes both, and the
+// abbreviation-only list meant "Cleveland, Ohio" survived whole — city and state
+// — while "Cleveland, OH" was caught. Longest-first ordering matters inside the
+// alternation: "Virginia" has to be offered before "Virgin" would ever match, and
+// "West Virginia" before "Virginia", or the leading word is left behind.
 const STATES =
-  "AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC";
+  "AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC|" +
+  "Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|" +
+  "New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|West Virginia|Virginia|Washington|Wisconsin|Wyoming|District of Columbia";
 
 // --- clinical spans that must survive scrubbing -----------------------------
 // Matched first, swapped for sentinels, restored last.
@@ -348,6 +355,22 @@ const RULES = [
     pattern:
       /\b\d{1,6}\s+(?:[A-Z][\w.'-]*\s+){0,4}(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Terrace|Ter|Place|Pl|Circle|Cir|Parkway|Pkwy|Suite|Apt|Unit)\b\.?/gi,
     replace: () => "[ADDRESS REDACTED]",
+  },
+  {
+    category: "Geography",
+    // "Cleveland, 44113" — a city sitting straight on top of a ZIP with NO state
+    // between them. The rule above needs a state token to fire, so this form
+    // published the city and redacted only the ZIP beside it, which reads in the
+    // review panel like the address line was handled.
+    //
+    // Found in the project's own sample record, where the second address line is
+    // exactly this. Geography below state level is Safe Harbor identifier 2, and
+    // city plus ZIP is more identifying than either alone.
+    //
+    // Placed before the bare-ZIP rule so the pair is consumed together; that rule
+    // would otherwise take the ZIP first and leave nothing to anchor the city to.
+    pattern: /\b[A-Z][a-z'’.-]+(?:[ -][A-Z][a-z'’.-]+){0,2},\s*\d{5}(?:-\d{4})?\b/g,
+    replace: () => "[CITY REDACTED] [ZIP REDACTED]",
   },
   {
     category: "Address",
