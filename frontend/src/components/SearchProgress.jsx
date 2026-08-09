@@ -158,55 +158,55 @@ export default function SearchProgress({
         </div>
 
 
-        <ol className="mt-lg">
+        <ol className="mt-lg space-y-lg">
           {stages.map((stage, i) => {
             const done = i < activeIndex;
             const running = i === activeIndex;
+            const isLast = i === stages.length - 1;
             return (
-              <li
-                key={stage.label}
-                className={`relative flex items-start gap-md overflow-hidden border-t border-rule py-sm first:border-t-0 ${
-                  running ? "" : "opacity-60"
-                }`}
-              >
-                <span className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center">
-                  {done ? (
-                    <Check className="h-4 w-4 text-ok" strokeWidth={2.75} />
-                  ) : running ? (
-                    <span className={still ? "stage-mark" : "stage-mark is-live"} />
-                  ) : (
-                    <span className="h-1.5 w-1.5 rounded-full bg-rule-strong" />
-                  )}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span
-                    // Same size and face in both states; only weight and colour
-                    // change. Swapping to a larger type ramp on the running row
-                    // resized it, which is the other half of the jump.
-                    className={`block font-display text-lg leading-snug transition-colors duration-mid ease-out ${
-                      running ? "font-semibold text-ink" : "font-medium text-ink-3"
-                    }`}
-                  >
-                    {stage.label}
-                  </span>
-                  {/* Always rendered, only faded. Mounting it on transition
-                      changed the list's height, and with the page centred that
-                      moved every element on screen — a jump with no cause the
-                      user could see. Reserving the space costs nothing. */}
-                  <span
-                    className={`mt-1 block text-sm leading-relaxed text-ink-3 transition-opacity duration-mid ease-out ${
-                      running ? "opacity-100" : "opacity-0"
-                    }`}
-                  >
-                    {liveDetail(i) ?? stage.detail}
-                  </span>
-                </span>
-                {/* The one moving thing on the page, and it sits on the row that
-                    is actually running: a hairline creeping along the active
-                    stage's rule. Indeterminate on purpose — the backend streams
-                    no progress, so a bar that filled to 100% would be a claim we
-                    cannot make. */}
-                {running && !still && <span className="stage-crawl" />}
+              <li key={stage.label} className="relative">
+                <div className="flex items-start gap-md">
+                  <div className="relative flex flex-col items-center">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 bg-paper transition-all duration-mid ease-out"
+                      style={{
+                        borderColor: done ? 'var(--color-ok)' : running ? 'var(--color-accent)' : 'var(--color-rule)',
+                        backgroundColor: done ? 'var(--color-ok)' : 'var(--color-paper)',
+                      }}>
+                      {done ? (
+                        <Check className="h-3 w-3 text-paper" strokeWidth={3} />
+                      ) : running ? (
+                        <span className={still ? "h-2 w-2 rounded-full bg-accent" : "h-2 w-2 rounded-full bg-accent animate-pulse"} />
+                      ) : (
+                        <span className="h-1.5 w-1.5 rounded-full" style={{backgroundColor: 'var(--color-rule)'}} />
+                      )}
+                    </span>
+                    {!isLast && (
+                      <div
+                        className="w-0.5 mt-2 mb-2 transition-all duration-mid ease-out"
+                        style={{
+                          height: '3rem',
+                          backgroundColor: done ? 'var(--color-ok)' : 'var(--color-rule)',
+                        }}
+                      />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 pt-0.5">
+                    <span
+                      className={`block font-display text-lg leading-snug transition-colors duration-mid ease-out ${
+                        running ? "font-semibold text-ink" : done ? "font-medium text-ink" : "font-medium text-ink-3"
+                      }`}
+                    >
+                      {stage.label}
+                    </span>
+                    <span
+                      className={`mt-1 block text-sm leading-relaxed text-ink-3 transition-opacity duration-mid ease-out ${
+                        running ? "opacity-100" : "opacity-60"
+                      }`}
+                    >
+                      {liveDetail(i) ?? stage.detail}
+                    </span>
+                  </div>
+                </div>
               </li>
             );
           })}

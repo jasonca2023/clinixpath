@@ -11,6 +11,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import { useLocationAutocomplete } from "../lib/useLocationAutocomplete.js";
 
 function formatSize(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
@@ -39,6 +40,14 @@ export default function IngestionPanel({
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef(null);
+  const locationInputRef = useRef(null);
+  const {
+    suggestions,
+    isLoading,
+    isOpen,
+    selectSuggestion,
+    closeSuggestions,
+  } = useLocationAutocomplete(location);
 
   const busy = loading || scrubbing;
 
@@ -110,15 +119,44 @@ export default function IngestionPanel({
           <div className="relative">
             <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" />
             <input
+              ref={locationInputRef}
               id="patient-location"
               type="text"
               spellCheck="false"
+              autoComplete="off"
               value={location}
               disabled={busy}
               onChange={(event) => onLocationChange(event.target.value)}
-              placeholder="City, State"
+              onBlur={() => setTimeout(closeSuggestions, 150)}
+              placeholder="City, Country"
               className="w-full rounded-lg border border-rule/80 bg-paper/70 py-3 pl-9 pr-3 text-sm text-ink placeholder:text-ink-3 transition-colors hover:border-rule-strong focus:border-accent/60 focus:bg-paper disabled:opacity-60"
             />
+            {isOpen && (suggestions.length > 0 || isLoading) && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border border-rule bg-paper shadow-card">
+                {isLoading && suggestions.length === 0 && (
+                  <div className="flex items-center gap-2 px-3 py-3 text-sm text-ink-3">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Finding locations...</span>
+                  </div>
+                )}
+                {suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.id}
+                    type="button"
+                    onClick={() => {
+                      const selected = selectSuggestion(suggestion);
+                      onLocationChange(selected);
+                    }}
+                    className="w-full px-3 py-2 text-left text-sm text-ink hover:bg-paper-2 first:rounded-t-lg last:rounded-b-lg transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-3 w-3 shrink-0 text-ink-3" />
+                      <span>{suggestion.display}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <label

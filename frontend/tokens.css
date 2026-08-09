@@ -41,7 +41,7 @@
    * a label font here; it is reserved for measured values so digits align.
    */
   --font-display: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-body: 'Atkinson Hyperlegible', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Display tracking tightens as size grows — the reference's signature move. */
@@ -121,20 +121,10 @@
   --color-rule: oklch(88.5% 0.009 78);
   --color-rule-strong: oklch(76% 0.013 76);
 
-  /* THE ACCENT IS INK. Not blue.
-   *
-   * "Protocol blue" at chroma 0.20 was the cliché this product kept landing in:
-   * a bright blue button is the default gesture of every clinical dashboard, and
-   * it competed with the only colour that carries meaning here — the verdict.
-   *
-   * print.css already settled the argument for the printed sheet: verdict state
-   * travels by symbol, weight and rule, because a greyscale laser has no hues to
-   * spend. The screen now follows the same rule. Chrome is ink on paper; the
-   * three verdict hues are the only saturated things on the page, so a CONFLICT
-   * is the most colourful pixel in the interface — which is exactly right. */
-  --color-accent: oklch(25% 0.021 66);
-  --color-accent-hover: oklch(33% 0.024 68);
-  --color-accent-soft: oklch(93.5% 0.013 78);
+  /* Accent is now blue. */
+  --color-accent: oklch(52% 0.20 258);
+  --color-accent-hover: oklch(58% 0.22 258);
+  --color-accent-soft: oklch(93.5% 0.045 258);
   --color-accent-ink: oklch(98.5% 0.004 88);
 
   /* Result flags, separated by HUE so they never rely on saturation to be
@@ -180,19 +170,18 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  /* Warm charcoal, same hue family as the light band, so the two read as one
-     product in two lighting conditions rather than as two themes. */
-  --color-paper: oklch(17.5% 0.010 70);
-  --color-paper-2: oklch(21.5% 0.011 70);
-  --color-paper-3: oklch(26.5% 0.012 70);
-  --color-paper-inset: oklch(20.5% 0.011 70);
+  /* Deep blue background instead of warm charcoal. */
+  --color-paper: oklch(17.5% 0.010 258);
+  --color-paper-2: oklch(21.5% 0.011 258);
+  --color-paper-3: oklch(26.5% 0.012 258);
+  --color-paper-inset: oklch(20.5% 0.011 258);
 
   --color-ink: oklch(96% 0.006 84);
   --color-ink-2: oklch(83% 0.009 78);
   --color-ink-3: oklch(64% 0.011 76);
 
-  --color-rule: oklch(30% 0.012 70);
-  --color-rule-strong: oklch(41% 0.014 72);
+  --color-rule: oklch(30% 0.012 258);
+  --color-rule-strong: oklch(41% 0.014 258);
 
   /* The light band's accent is near-black on paper; inverted, it is near-paper
      on ink. Same gesture — a filled block of the highest-contrast neutral — so
@@ -236,17 +225,17 @@
   :root:not([data-theme]) {
     color-scheme: dark;
 
-    --color-paper: oklch(17.5% 0.010 70);
-    --color-paper-2: oklch(21.5% 0.011 70);
-    --color-paper-3: oklch(26.5% 0.012 70);
-    --color-paper-inset: oklch(20.5% 0.011 70);
+    --color-paper: oklch(17.5% 0.010 258);
+    --color-paper-2: oklch(21.5% 0.011 258);
+    --color-paper-3: oklch(26.5% 0.012 258);
+    --color-paper-inset: oklch(20.5% 0.011 258);
 
     --color-ink: oklch(96% 0.006 84);
     --color-ink-2: oklch(83% 0.009 78);
     --color-ink-3: oklch(64% 0.011 76);
 
-    --color-rule: oklch(30% 0.012 70);
-    --color-rule-strong: oklch(41% 0.014 72);
+    --color-rule: oklch(30% 0.012 258);
+    --color-rule-strong: oklch(41% 0.014 258);
 
     --color-accent: oklch(93% 0.010 80);
     --color-accent-hover: oklch(99% 0.004 88);
