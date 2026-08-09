@@ -1,0 +1,279 @@
+/* Hallmark · macrostructure: Marquee Hero (marketing) + Stat-Led (app)
+ * genre: modern-minimal · theme: CUSTOM "Protocol" · nav: N1b · footer: Ft2
+ * design-system: design.md · designed-as-app
+ * vibe: precise, high-contrast, confident, trial-protocol authority
+ * paper oklch(97.5% 0.002 250) neutral leaf · accent oklch(52% 0.20 258) protocol blue
+ * axes: light paper-band / grotesk-sans display / saturated-cool accent
+ * pre-emit critique: P5 H5 E5 S5 R4 V5
+ *
+ * WHAT CHANGED FROM "Chart", AND WHY.
+ *
+ * Chart was correct in its reasoning and wrong in its result. It argued for a calm
+ * clinical readout and then desaturated everything until nothing had rank: accent
+ * chroma 0.09, ink at 22% on paper at 98.8%, every container a hairline rule, and a
+ * display scale that topped out below 4rem. A page where nothing is emphasised is
+ * not calm, it is flat — the eye has no idea where to land, which in a tool whose
+ * whole output is a verdict is a hierarchy failure, not a stylistic one.
+ *
+ * Protocol keeps Chart's two genuinely right calls — light-first (clinicians read
+ * dense data in lit rooms) and colour-as-flag-only — and fixes the rest:
+ *
+ *   1. INK GOES DARKER (22% -> 17%) and paper goes slightly grey (98.8% -> 97.5%),
+ *      so body text gains real contrast instead of floating.
+ *   2. ACCENT MORE THAN DOUBLES IN CHROMA (0.09 -> 0.20). Chart worried a loud blue
+ *      would steal attention from result flags. The flags got louder too, and they
+ *      are separated by HUE, not by saturation — so blue can be confident without
+ *      competing. Blue never marks a result; it only marks something you can click.
+ *   3. SURFACES LIFT. Chart made cards LIGHTER than the page (inset 99.6% on paper
+ *      98.8%), which reads as a hole, not a card. Protocol puts pure-white surfaces
+ *      on a light-grey ground with a real shadow, so a panel is an object.
+ *   4. DISPLAY GETS BIG. A 5.5rem ceiling and -0.04em tracking, because the one
+ *      thing the landing page has to do is state what this is, once, loudly.
+ */
+
+:root {
+  /* ---- type ------------------------------------------------------------
+   * 2+1. Instrument Sans is the display voice: a contemporary grotesque that
+   * holds tight tracking at 5rem without turning into a logo, which is what the
+   * reference (Ballpark) does with Söhne. IBM Plex Sans stays as the body, because
+   * it was drawn for institutional and technical interfaces and is still the most
+   * credible face in the set at 13px inside a dense compliance table. Mono is not
+   * a label font here; it is reserved for measured values so digits align.
+   */
+  --font-display: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Display tracking tightens as size grows — the reference's signature move. */
+  --track-display: -0.04em;
+  --track-tight: -0.02em;
+
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.0625rem;
+  --text-xl: 1.3125rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.375rem;
+  --text-display-s: clamp(2rem, 3.4vw + 0.9rem, 3.25rem);
+  --text-display: clamp(2.75rem, 5.6vw + 0.5rem, 5.5rem);
+
+  /* ---- 4pt space scale ------------------------------------------------- */
+  --space-2xs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+  --space-2xl: 4rem;
+  --space-3xl: 6.5rem;
+
+  /* ---- geometry --------------------------------------------------------
+   * Softer than Chart's 3px. The reference rounds meaningfully (8-12px) which is
+   * what makes a surface read as an object rather than a table cell. Never pill:
+   * a pill button in a medical readout reads consumer.
+   */
+  /* Sharpened from 5/8/12/16. Generous rounding is the visual signature of a
+     consumer app, and it was fighting the argument the rest of the product
+     makes — that this is an instrument producing a document a clinician signs.
+     Near-square corners read as filed paper and as lab equipment; they also let
+     rules meet cleanly at a corner instead of dissolving into an arc. */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+
+  --rule: 1px;
+  --rule-section: 1.5px;
+  --rule-instrument: 2px;
+  --rule-page: 3px;
+
+  /* ---- motion ---------------------------------------------------------- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-mid: 220ms;
+  --dur-slow: 520ms;
+}
+
+/* ======================================================================== */
+/* LIGHT — the default. Clinical software is light-first.                   */
+/* ======================================================================== */
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* WARM paper, not blue-grey. The hue moves from 250 (cool) to ~80 (warm),
+     which is the single change that stops this reading as generic health SaaS.
+     Every product in that category grounds on a cool grey and accents in bright
+     blue; the ones people actually praise for their design (Abridge, Tia) do the
+     opposite — off-white with warmth, deep ink, and colour held in reserve. */
+  --color-paper: oklch(96.8% 0.006 84);
+  --color-paper-2: oklch(94.2% 0.008 82);
+  --color-paper-3: oklch(90.5% 0.010 80);
+  --color-paper-inset: oklch(99.4% 0.003 88);
+
+  --color-ink: oklch(19% 0.012 68);
+  --color-ink-2: oklch(41% 0.011 70);
+  --color-ink-3: oklch(58% 0.010 72);
+
+  --color-rule: oklch(88.5% 0.009 78);
+  --color-rule-strong: oklch(76% 0.013 76);
+
+  /* THE ACCENT IS INK. Not blue.
+   *
+   * "Protocol blue" at chroma 0.20 was the cliché this product kept landing in:
+   * a bright blue button is the default gesture of every clinical dashboard, and
+   * it competed with the only colour that carries meaning here — the verdict.
+   *
+   * print.css already settled the argument for the printed sheet: verdict state
+   * travels by symbol, weight and rule, because a greyscale laser has no hues to
+   * spend. The screen now follows the same rule. Chrome is ink on paper; the
+   * three verdict hues are the only saturated things on the page, so a CONFLICT
+   * is the most colourful pixel in the interface — which is exactly right. */
+  --color-accent: oklch(25% 0.021 66);
+  --color-accent-hover: oklch(33% 0.024 68);
+  --color-accent-soft: oklch(93.5% 0.013 78);
+  --color-accent-ink: oklch(98.5% 0.004 88);
+
+  /* Result flags, separated by HUE so they never rely on saturation to be
+     distinct from the accent. Matches how a lab report marks a value. */
+  --color-ok: oklch(52% 0.15 152);
+  --color-ok-soft: oklch(95.5% 0.045 152);
+  --color-risk: oklch(53% 0.20 27);
+  --color-risk-soft: oklch(95.5% 0.040 27);
+  --color-hold: oklch(58% 0.13 70);
+  --color-hold-soft: oklch(96% 0.048 75);
+  --color-gap: oklch(56% 0.010 76);
+  --color-gap-soft: oklch(94% 0.008 78);
+
+  --color-band: oklch(21% 0.014 66);
+  --color-band-ink: oklch(96.5% 0.006 84);
+  --color-band-ink-2: oklch(78% 0.010 78);
+  --color-band-rule: oklch(34% 0.016 68);
+
+  --color-violet: oklch(48% 0.14 300);
+  --color-violet-soft: oklch(95% 0.030 300);
+
+  /* Focus is the ONE place chrome is allowed a hue, because it must be findable
+     against ink, paper and every verdict tint at once. Ochre, not blue. */
+  --color-focus: oklch(58% 0.15 62);
+
+  /* Shadows are almost gone. A document separates with rules and with a real
+     tonal step between ground and surface; a drop shadow under every panel is
+     what made this look like a dashboard. One faint lift survives for things
+     that genuinely float (dialogs, the sticky masthead). */
+  --shadow-lift: 0 1px 0 oklch(19% 0.012 68 / 0.04);
+  --shadow-card: 0 1px 0 oklch(19% 0.012 68 / 0.05);
+  --shadow-raised: 0 1px 2px oklch(19% 0.012 68 / 0.08),
+    0 16px 40px -16px oklch(19% 0.012 68 / 0.22);
+}
+
+/* ======================================================================== */
+/* DARK — night shifts and dim reading rooms.                               */
+/* ======================================================================== */
+/* Not a grey inversion. The ground carries a trace of the accent's hue (258)
+   so the blue belongs to the surface rather than glowing on top of neutral
+   charcoal, and surfaces step UP in lightness so the lift survives the flip.
+   Pure black is avoided: it maximises halation on the thin type this UI uses. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Warm charcoal, same hue family as the light band, so the two read as one
+     product in two lighting conditions rather than as two themes. */
+  --color-paper: oklch(17.5% 0.010 70);
+  --color-paper-2: oklch(21.5% 0.011 70);
+  --color-paper-3: oklch(26.5% 0.012 70);
+  --color-paper-inset: oklch(20.5% 0.011 70);
+
+  --color-ink: oklch(96% 0.006 84);
+  --color-ink-2: oklch(83% 0.009 78);
+  --color-ink-3: oklch(64% 0.011 76);
+
+  --color-rule: oklch(30% 0.012 70);
+  --color-rule-strong: oklch(41% 0.014 72);
+
+  /* The light band's accent is near-black on paper; inverted, it is near-paper
+     on ink. Same gesture — a filled block of the highest-contrast neutral — so
+     the primary action stays the most solid thing on screen in both bands
+     without introducing a hue that would compete with a verdict. */
+  --color-accent: oklch(93% 0.010 80);
+  --color-accent-hover: oklch(99% 0.004 88);
+  --color-accent-soft: oklch(27% 0.013 72);
+  --color-accent-ink: oklch(17% 0.010 70);
+
+  --color-ok: oklch(76% 0.16 152);
+  --color-ok-soft: oklch(28% 0.060 152);
+  --color-risk: oklch(70% 0.17 25);
+  --color-risk-soft: oklch(29% 0.070 25);
+  --color-hold: oklch(80% 0.13 76);
+  --color-hold-soft: oklch(30% 0.055 74);
+  --color-gap: oklch(69% 0.010 74);
+  --color-gap-soft: oklch(27% 0.010 72);
+
+  /* Inverted in the dark band: the grounding block becomes the PALE one, so the
+     landing page's dark slab reads as a sheet of paper laid on the console. */
+  --color-band: oklch(93.5% 0.008 82);
+  --color-band-ink: oklch(19% 0.012 68);
+  --color-band-ink-2: oklch(41% 0.011 70);
+  --color-band-rule: oklch(83% 0.011 78);
+
+  --color-violet: oklch(74% 0.13 300);
+  --color-violet-soft: oklch(29% 0.060 300);
+
+  --color-focus: oklch(76% 0.15 68);
+
+  --shadow-lift: 0 1px 0 oklch(0% 0 0 / 0.35);
+  --shadow-card: 0 1px 0 oklch(0% 0 0 / 0.4);
+  --shadow-raised: 0 1px 2px oklch(0% 0 0 / 0.45), 0 16px 40px -16px oklch(0% 0 0 / 0.7);
+}
+
+/* Respect the OS when the user has expressed no preference of their own.
+   Body is kept byte-identical to the [data-theme='dark'] block above; if you
+   edit one, edit both. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+
+    --color-paper: oklch(17.5% 0.010 70);
+    --color-paper-2: oklch(21.5% 0.011 70);
+    --color-paper-3: oklch(26.5% 0.012 70);
+    --color-paper-inset: oklch(20.5% 0.011 70);
+
+    --color-ink: oklch(96% 0.006 84);
+    --color-ink-2: oklch(83% 0.009 78);
+    --color-ink-3: oklch(64% 0.011 76);
+
+    --color-rule: oklch(30% 0.012 70);
+    --color-rule-strong: oklch(41% 0.014 72);
+
+    --color-accent: oklch(93% 0.010 80);
+    --color-accent-hover: oklch(99% 0.004 88);
+    --color-accent-soft: oklch(27% 0.013 72);
+    --color-accent-ink: oklch(17% 0.010 70);
+
+    --color-ok: oklch(76% 0.16 152);
+    --color-ok-soft: oklch(28% 0.060 152);
+    --color-risk: oklch(70% 0.17 25);
+    --color-risk-soft: oklch(29% 0.070 25);
+    --color-hold: oklch(80% 0.13 76);
+    --color-hold-soft: oklch(30% 0.055 74);
+    --color-gap: oklch(69% 0.010 74);
+    --color-gap-soft: oklch(27% 0.010 72);
+
+    --color-band: oklch(93.5% 0.008 82);
+    --color-band-ink: oklch(19% 0.012 68);
+    --color-band-ink-2: oklch(41% 0.011 70);
+    --color-band-rule: oklch(83% 0.011 78);
+
+    --color-violet: oklch(74% 0.13 300);
+    --color-violet-soft: oklch(29% 0.060 300);
+
+    --color-focus: oklch(76% 0.15 68);
+
+    --shadow-lift: 0 1px 0 oklch(0% 0 0 / 0.35);
+    --shadow-card: 0 1px 0 oklch(0% 0 0 / 0.4);
+    --shadow-raised: 0 1px 2px oklch(0% 0 0 / 0.45), 0 16px 40px -16px oklch(0% 0 0 / 0.7);
+  }
+}

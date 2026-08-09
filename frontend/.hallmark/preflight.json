@@ -1,0 +1,12 @@
+{
+  "date": "2026-07-27",
+  "framework": "Vite 5 + React 18",
+  "css": "Tailwind v3",
+  "fonts_before": "Inter + system mono (system stack, no webfont)",
+  "fonts_after": "Space Grotesk + Inter + JetBrains Mono (Google Fonts)",
+  "palette_before": "Tailwind zinc/emerald utilities + 4 custom surface tokens",
+  "palette_after": "OKLCH token layer, dual light/dark band (tokens.css)",
+  "motion": "none installed, motion-cut project",
+  "spacing": "Tailwind default 4pt scale, aliased to --space-* tokens",
+  "notes": "index.html was hard-locked class=dark; replaced with data-theme + no-flash bootstrap."
+}

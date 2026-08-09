@@ -1,0 +1,470 @@
+/* ClinixPath · print sheet
+ *
+ * Print is not the console in greyscale. It is a different document with a
+ * different reader: the patient, holding paper, with no theme switch and often
+ * no colour cartridge. So nothing in this file references a theme token.
+ *
+ * WHY EVERY COLOUR HERE IS A LITERAL. The app's colours resolve through
+ * `--color-*` custom properties that flip with `data-theme`. A clinician working
+ * a night shift in the dark band who hits print would otherwise hand over a page
+ * of pale text, or a solid black rectangle if their browser is set to print
+ * backgrounds. Black ink on white paper, forced, in both bands.
+ *
+ * WHY THERE IS NO `print-color-adjust: exact`. Nothing on the sheet depends on a
+ * tint. Verdict state is carried by a symbol, a weight and a rule, all of which
+ * survive a greyscale laser printer and a photocopy of a photocopy.
+ *
+ * The sheet root also carries an inline `display: none`. Only the important
+ * declaration inside the print block below turns it on, so if this file is ever
+ * dropped from the bundle the brief stays invisible instead of dumping raw
+ * markup into the console layout.
+ *
+ * Type is set in pt because the target is a physical page, not a viewport.
+ */
+
+@media print {
+  @page {
+    size: auto;
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+    color-scheme: light !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* The console never prints. `#root` covers the entire app tree, which is why
+     the sheet is portaled to <body>: no sibling panel has to opt out, and a
+     modal left open cannot land on the page. `.no-print` is the escape hatch for
+     anything mounted outside the root. */
+  #root,
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  /* ======================================================================
+     Sheet
+     ====================================================================== */
+
+  .pb-sheet {
+    font-family: var(--font-body), 'IBM Plex Sans', ui-sans-serif, system-ui,
+      sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Blunt on purpose. The sheet inherits from <body>, which in the dark band is
+     light text on a dark ground, and any descendant could pick up a token
+     through an inherited property. One sweep guarantees the page is readable
+     whichever band the console was in. */
+  .pb-sheet,
+  .pb-sheet * {
+    color: #000 !important;
+    background: transparent !important;
+    border-color: #000 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    float: none !important;
+    /* One column throughout. The console's grid leaves with #root, and nothing
+       on the sheet is allowed to reintroduce a second track. */
+    columns: auto !important;
+  }
+
+  /* `:where()` keeps the reset at zero specificity so every component rule
+     below can override it without reaching for !important. */
+  .pb-sheet :where(p, h2, h3, h4, ul, ol) {
+    margin: 0;
+    padding: 0;
+  }
+
+  .pb-sheet :where(ul, ol) {
+    list-style: none;
+  }
+
+  .pb-sheet :where(h2, h3, h4) {
+    font-family: var(--font-display), 'Instrument Sans', ui-sans-serif, system-ui,
+      sans-serif;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* ======================================================================
+     Masthead
+     ====================================================================== */
+
+  .pb-head {
+    border-bottom: 1.25pt solid #000;
+    padding-bottom: 6pt;
+  }
+
+  .pb-mark {
+    display: flex;
+    align-items: center;
+    gap: 6pt;
+  }
+
+  .pb-mark-icon {
+    width: 15pt;
+    height: 15pt;
+    flex: none;
+    stroke: #000 !important;
+  }
+
+  .pb-brand {
+    font-family: var(--font-display), 'Instrument Sans', ui-sans-serif, sans-serif;
+    font-size: 14pt;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  .pb-brand-sub {
+    font-size: 7.5pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    line-height: 1.3;
+  }
+
+  .pb-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4pt 20pt;
+    margin-top: 6pt;
+  }
+
+  .pb-meta-k {
+    display: block;
+    font-size: 7pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .pb-meta-v {
+    display: block;
+    font-size: 10pt;
+    font-weight: 600;
+    margin-top: 0.5pt;
+  }
+
+  .pb-note {
+    border: 0.75pt solid #000;
+    padding: 5pt 6pt;
+    margin-top: 7pt;
+    font-size: 8.25pt;
+    line-height: 1.35;
+    font-weight: 500;
+  }
+
+  /* The "part of the record only" caveat. Weight and a heavier rule, not colour:
+     the sheet is printed in greyscale, so a tinted warning would arrive as a grey
+     box indistinguishable from the notice above it. */
+  .pb-note-warn {
+    border-width: 2pt;
+    font-weight: 700;
+  }
+
+  /* ======================================================================
+     Section furniture
+     ====================================================================== */
+
+  .pb-block {
+    margin-top: 11pt;
+  }
+
+  /* A section heading must never be the last thing on a page. "Studies not
+     carried forward" printed at the foot of page one with its studies overleaf,
+     which reads as a section that came out empty. The heading and its lede now
+     travel with whatever follows them. */
+  .pb-h2 {
+    font-size: 9.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border-bottom: 0.75pt solid #000;
+    padding-bottom: 2.5pt;
+    margin-bottom: 5pt;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .pb-lede {
+    font-size: 8.5pt;
+    line-height: 1.4;
+    margin-bottom: 4pt;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* ======================================================================
+     Questions to ask my doctor
+     The reason the page exists, so it gets the heaviest frame on the sheet and
+     sits above the ranking rather than under it.
+     ====================================================================== */
+
+  .pb-questions {
+    border: 1.5pt solid #000;
+    padding: 8pt 9pt 9pt;
+  }
+
+  .pb-h2-loud {
+    font-size: 13pt;
+    letter-spacing: -0.01em;
+    text-transform: none;
+    border-bottom: 0;
+    padding-bottom: 0;
+    margin-bottom: 2pt;
+  }
+
+  .pb-qlist {
+    counter-reset: pbq;
+    margin-top: 2pt;
+  }
+
+  .pb-qlist > li {
+    counter-increment: pbq;
+    position: relative;
+    padding-left: 20pt;
+    margin-top: 6pt;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .pb-qlist > li::before {
+    content: counter(pbq, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    top: 0.5pt;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 9pt;
+    font-weight: 700;
+  }
+
+  .pb-q {
+    font-size: 10.5pt;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .pb-qcrit {
+    font-size: 8pt;
+    line-height: 1.35;
+    margin-top: 1.5pt;
+    padding-left: 5pt;
+    border-left: 0.75pt solid #000;
+  }
+
+  .pb-qnote {
+    font-size: 7.75pt;
+    font-weight: 600;
+    margin-top: 1.5pt;
+  }
+
+  .pb-qmore {
+    font-size: 7.75pt;
+    margin-top: 6pt;
+    padding-top: 4pt;
+    border-top: 0.5pt solid #000;
+  }
+
+  /* ======================================================================
+     Study blocks
+     ====================================================================== */
+
+  .pb-trial {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    padding: 6pt 0 2pt;
+    border-top: 0.5pt solid #000;
+  }
+
+  .pb-trials > .pb-trial:first-child {
+    border-top: 0;
+    padding-top: 1pt;
+  }
+
+  .pb-trial-top {
+    display: flex;
+    align-items: baseline;
+    gap: 7pt;
+  }
+
+  .pb-rank {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 9pt;
+    font-weight: 700;
+    flex: none;
+  }
+
+  .pb-trial-body {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .pb-idline {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 8.5pt;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+
+  .pb-phase {
+    border: 0.5pt solid #000;
+    padding: 0 3pt;
+    margin-left: 5pt;
+    font-family: var(--font-body), 'IBM Plex Sans', sans-serif;
+    font-size: 7pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+
+  .pb-title {
+    font-size: 10.5pt;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-top: 2pt;
+    overflow-wrap: anywhere;
+  }
+
+  .pb-verdict {
+    font-size: 8.5pt;
+    font-weight: 700;
+    margin-top: 2.5pt;
+  }
+
+  .pb-sym {
+    display: inline-block;
+    width: 10pt;
+    font-weight: 700;
+  }
+
+  .pb-counts,
+  .pb-sites {
+    font-size: 8.25pt;
+    line-height: 1.35;
+    margin-top: 1.5pt;
+  }
+
+  .pb-url {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 7.25pt;
+    margin-top: 1.5pt;
+    overflow-wrap: anywhere;
+  }
+
+  .pb-crit-h {
+    font-size: 7.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    margin-top: 5pt;
+  }
+
+  .pb-list {
+    margin-top: 1.5pt;
+  }
+
+  .pb-list > li {
+    position: relative;
+    padding-left: 11pt;
+    margin-top: 2pt;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* The verdict glyph is the state. It is set on the element rather than baked
+     into the copy so the same list markup reads correctly in greyscale. */
+  .pb-list > li::before {
+    content: attr(data-sym);
+    position: absolute;
+    left: 0;
+    top: 0;
+    font-weight: 700;
+  }
+
+  .pb-crit {
+    display: block;
+    font-size: 8.75pt;
+    line-height: 1.35;
+  }
+
+  .pb-fact {
+    display: block;
+    font-size: 7.75pt;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-top: 0.5pt;
+  }
+
+  /* ======================================================================
+     Recorded answers
+     ====================================================================== */
+
+  .pb-answers > li {
+    margin-top: 4.5pt;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .pb-answer-label {
+    display: block;
+    font-size: 8.75pt;
+    line-height: 1.3;
+  }
+
+  .pb-answer-state {
+    display: inline-block;
+    font-size: 7pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border: 0.5pt solid #000;
+    padding: 0 3pt;
+    margin-top: 1.5pt;
+  }
+
+  .pb-answer-value {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 8.25pt;
+    margin-left: 5pt;
+  }
+
+  /* ======================================================================
+     Footer
+     ====================================================================== */
+
+  .pb-foot {
+    margin-top: 12pt;
+    padding-top: 5pt;
+    border-top: 1.25pt solid #000;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .pb-foot p {
+    font-size: 7.5pt;
+    line-height: 1.35;
+    margin-top: 2.5pt;
+  }
+
+  .pb-foot p:first-child {
+    margin-top: 0;
+  }
+}

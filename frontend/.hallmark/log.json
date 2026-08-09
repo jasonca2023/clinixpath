@@ -1,0 +1,36 @@
+[
+  {
+    "date": "2026-08-04",
+    "scope": "app",
+    "macrostructure": "Marquee Hero (marketing) + Stat-Led (app)",
+    "theme": "custom",
+    "theme_axes": "light paper-band / grotesk-sans display / saturated-cool accent",
+    "vibe": "precise, high-contrast, confident, trial-protocol authority",
+    "enrichment": "none — typography only",
+    "nav": "N1b canonical SaaS three-section",
+    "footer": "Ft2 inline rule single line",
+    "design_system": "design.md",
+    "brief": "ClinixPath · retheme to Ballpark DNA, fix flat hierarchy, staged loading state for 30-90s runs"
+  },
+  {
+    "date": "2026-07-30",
+    "macrostructure": "Workbench",
+    "theme": "custom",
+    "theme_axes": "light paper-band / humanist-sans display / cool-blue accent",
+    "vibe": "clinical, legible, calm, lab-report precision",
+    "enrichment": "none",
+    "nav": "N6 newspaper masthead",
+    "footer": "Ft4 dense typographic",
+    "brief": "ClinixPath · ruled-not-carded console retheme (superseded — read as flat)"
+  },
+  {
+    "date": "2026-07-27",
+    "macrostructure": "Narrative Workflow",
+    "theme": "Cobalt",
+    "theme_axes": "dual-band (cool-light + cool-dark) / grotesk-sans / electric-cobalt-256",
+    "enrichment": "Tier-A CSS verdict card (no re-drawn chrome)",
+    "nav": "N9 edge-aligned minimal",
+    "footer": "Ft5 statement",
+    "brief": "ClinixPath · clinical trial eligibility console: landing page, terms gate, dual-band retheme, favicon"
+  }
+]
