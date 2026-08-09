@@ -1,0 +1,35 @@
+
+> clinixpath-frontend@0.1.0 dev
+> vite
+
+Port 5173 is in use, trying another one...
+Port 5174 is in use, trying another one...
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m228[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5175[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[2m11:05:45 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:05:59 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:07:32 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:10:23 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:12:26 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:13:55 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:17:00 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:18:12 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:23:49 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:24:35 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:29:18 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:30:04 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:30:13 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:33:56 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:35:19 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:35:24 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:35:31 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:45:33 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:54:30 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:55:42 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:55:49 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:55:55 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/IngestionPanel.jsx, /src/index.css[22m
+[2m11:58:59 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css[22m
+[2m12:08:41 PM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css[22m
