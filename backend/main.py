@@ -977,6 +977,17 @@ async def rate_limit(request: Request, call_next):
     """Cap how often one address can reach the endpoints that cost money."""
     if request.method != "OPTIONS" and request.url.path in _METERED_PATHS:
         ip = _client_ip(request)
+        # Logged on every metered request, not only on refusal. Which address a
+        # limiter keys on is a judgement about someone else's proxy layout, and
+        # two different judgements were wrong on this host before one was right —
+        # neither visible without seeing the chain the service actually received.
+        # Low volume by construction: only the paths that spend money reach here.
+        log.info(
+            "caller    %s  xff=%r peer=%s",
+            ip,
+            request.headers.get("x-forwarded-for", "")[:120],
+            request.client.host if request.client else "?",
+        )
         if _over_rate_limit(ip):
             minutes = max(1, RATE_LIMIT_WINDOW_SECONDS // 60)
             # The raw chain goes in the line too: the resolved address is a
