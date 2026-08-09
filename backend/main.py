@@ -891,21 +891,61 @@ _METERED_PATHS = ("/api/discover", "/api/discover/stream", "/api/analyze")
 _rate_buckets: "OrderedDict[str, Deque[float]]" = OrderedDict()
 
 
+def _is_routable(candidate: str) -> bool:
+    """True for an address that could belong to a real caller on the internet."""
+    try:
+        address = ipaddress.ip_address(candidate.split("%")[0])
+    except ValueError:
+        return False
+    return not (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_reserved
+        or address.is_unspecified
+    )
+
+
 def _client_ip(request: Request) -> str:
     """
     The caller's address, as far as it can be trusted behind a platform proxy.
 
-    Reads the RIGHTMOST entry of X-Forwarded-For, not the leftmost. The leftmost
-    is whatever the client claimed and is trivially forged — a script sending a
-    fresh fake value per request would get an unlimited allowance from a limiter
-    that believed it. Each proxy APPENDS the peer it actually saw, so the last
-    entry is the one written by infrastructure rather than by the caller.
+    Walks X-Forwarded-For from the RIGHT and returns the first PUBLIC address.
+
+    Both halves of that matter, and each was learned the hard way:
+
+    From the right, because each proxy appends the peer it actually saw. The
+    leftmost entry is whatever the caller claimed and is trivially forged — a
+    script changing one header per request would get an unlimited allowance from
+    a limiter that believed it, which is worse than no limiter because it looks
+    like protection.
+
+    Skipping private addresses, because taking the rightmost entry outright is
+    wrong on a real platform. Measured on the deployed service: the rightmost hop
+    is 10.27.203.252, Render's own internal load balancer, so EVERY caller
+    resolved to the same address and shared one bucket — twenty requests from
+    anyone would have throttled everyone. A local test cannot see this; there is
+    no proxy in front of a laptop.
+
+    The private hops are infrastructure, so the last public address before them
+    is the furthest-out machine that infrastructure actually observed.
     """
     forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        hops = [h.strip() for h in forwarded.split(",") if h.strip()]
-        if hops:
-            return hops[-1]
+    hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+    for hop in reversed(hops):
+        if _is_routable(hop):
+            return hop
+
+    # No public address in the chain. Some platforms carry the caller in their
+    # own header instead; these are only consulted once XFF has come up empty,
+    # so a forged one cannot pre-empt a real forwarding chain.
+    for header in ("x-real-ip", "true-client-ip", "cf-connecting-ip"):
+        value = request.headers.get(header, "").strip()
+        if _is_routable(value):
+            return value
+
+    # Direct connection (local dev), or a caller genuinely inside a private
+    # network. The socket peer is the honest answer for both.
     return request.client.host if request.client else "unknown"
 
 
@@ -939,7 +979,16 @@ async def rate_limit(request: Request, call_next):
         ip = _client_ip(request)
         if _over_rate_limit(ip):
             minutes = max(1, RATE_LIMIT_WINDOW_SECONDS // 60)
-            log.info("ratelimit %s exceeded %d/%ds", ip, RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW_SECONDS)
+            # The raw chain goes in the line too: the resolved address is a
+            # judgement about someone else's proxy layout, and the only way to
+            # check that judgement on a deployed service is to see what it read.
+            log.info(
+                "ratelimit %s exceeded %d/%ds  xff=%r",
+                ip,
+                RATE_LIMIT_REQUESTS,
+                RATE_LIMIT_WINDOW_SECONDS,
+                request.headers.get("x-forwarded-for", "")[:120],
+            )
             origin = request.headers.get("origin", "")
             return JSONResponse(
                 status_code=429,

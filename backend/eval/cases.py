@@ -852,10 +852,33 @@ def _plumbing_checks(main):
                 self.client = type("C", (), {"host": host})()
 
         assert main._client_ip(Req()) == "9.9.9.9"
-        assert main._client_ip(Req("203.0.113.7")) == "203.0.113.7"
-        assert main._client_ip(Req("1.2.3.4, 203.0.113.7")) == "203.0.113.7", (
+        assert main._client_ip(Req("8.8.8.8")) == "8.8.8.8"
+        assert main._client_ip(Req("1.2.3.4, 38.122.182.130")) == "38.122.182.130", (
             "a forged leading hop is being trusted"
         )
+
+        # THE SHAPE A REAL PLATFORM SENDS. Taking the rightmost hop outright
+        # passed every local test and was wrong in production: measured on the
+        # deployed service, the last hop is 10.27.203.252 — Render's own internal
+        # load balancer — so every caller resolved to one address and shared a
+        # single bucket. Twenty requests from anyone would have throttled
+        # everyone, and nothing on a laptop can reproduce it, because there is no
+        # proxy in front of a laptop.
+        assert main._client_ip(Req("38.122.182.130, 10.27.203.252")) == "38.122.182.130", (
+            "an internal proxy hop is being treated as the caller"
+        )
+        # Private hops are skipped, not merely the last one.
+        assert main._client_ip(Req("8.8.4.4, 10.0.0.7, 172.16.0.1")) == "8.8.4.4"
+        # A chain with no public address at all falls back to the socket peer
+        # rather than bucketing everyone under a private address.
+        assert main._client_ip(Req("10.0.0.1, 10.27.203.252")) == "9.9.9.9"
+        # Unparseable entries cannot break the walk.
+        assert main._client_ip(Req("not-an-ip, 8.8.4.4, 10.0.0.5")) == "8.8.4.4"
+        # And a forged PUBLIC address still cannot pre-empt the real one, because
+        # the walk runs right to left.
+        assert main._client_ip(
+            Req("8.8.8.8, 38.122.182.130, 10.0.0.1")
+        ) == "38.122.182.130"
 
         saved_limit = main.RATE_LIMIT_REQUESTS
         saved_cap = main.RATE_LIMIT_MAX_TRACKED
@@ -871,7 +894,7 @@ def _plumbing_checks(main):
             # Changing only the forged hop must NOT buy a fresh allowance.
             main._rate_buckets.clear()
             spoofed = [
-                main._over_rate_limit(main._client_ip(Req(f"10.0.0.{i}, 203.0.113.7")))
+                main._over_rate_limit(main._client_ip(Req(f"10.0.0.{i}, 38.122.182.130")))
                 for i in range(5)
             ]
             assert spoofed == [False, False, False, True, True], spoofed
