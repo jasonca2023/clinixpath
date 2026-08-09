@@ -253,6 +253,16 @@ def _active_provider() -> Dict[str, str]:
     if requested in LLM_PRESETS:
         chosen = requested
     else:
+        if requested:
+            # A typo used to fall through to auto-detection in silence, so
+            # LLM_PROVIDER=grok ran happily on whatever key happened to be set
+            # and every symptom pointed at the wrong provider.
+            log.info(
+                "config    LLM_PROVIDER=%r is not a known preset (%s); "
+                "falling back to auto-detection",
+                requested,
+                ", ".join(LLM_PRESETS),
+            )
         chosen = next(
             (
                 name
@@ -408,12 +418,34 @@ DISCOVERY_TOTAL_TIMEOUT_SECONDS = 300
 #
 # 2 keeps one call inside Groq's window with the next queued behind it, and
 # leaves the fallback for genuine failures rather than for self-inflicted ones.
-DISCOVERY_CONCURRENCY = max(1, int(os.environ.get("DISCOVERY_CONCURRENCY", "2")))
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    """
+    Read an integer setting without letting a typo kill the process.
+
+    These are read at import time, so `DISCOVERY_CONCURRENCY=two` in .env took
+    the server down with a bare ValueError traceback and no mention of which
+    variable was at fault — the least useful possible failure for a config
+    mistake. A bad value now warns and falls back to the shipped default.
+    """
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return max(minimum, int(raw.strip()))
+    except ValueError:
+        log.info(
+            "config    %s=%r is not an integer; using the default %d",
+            name, raw.strip()[:40], default,
+        )
+        return default
+
+
+DISCOVERY_CONCURRENCY = _env_int("DISCOVERY_CONCURRENCY", 2)
 
 # Default number of trials to score per run. Six meant seven model calls; on a
 # queue where one call is ~86s that is minutes of wall clock for results the user
 # reads top-down anyway. Four is one full wave at the concurrency above.
-DEFAULT_MAX_TRIALS = max(1, int(os.environ.get("DEFAULT_MAX_TRIALS", "4")))
+DEFAULT_MAX_TRIALS = _env_int("DEFAULT_MAX_TRIALS", 4)
 
 # Free-tier context windows are finite and a 300-page chart would blow the budget
 # (and the latency SLA). These caps keep a single request comfortably inside the
@@ -428,7 +460,7 @@ DEFAULT_MAX_TRIALS = max(1, int(os.environ.get("DEFAULT_MAX_TRIALS", "4")))
 #
 # This has to cover REASONING PLUS ANSWER, not just the answer, which is why it is
 # well above what a 12-row matrix needs on its own.
-LLM_MAX_OUTPUT_TOKENS = int(os.environ.get("LLM_MAX_OUTPUT_TOKENS", "8192"))
+LLM_MAX_OUTPUT_TOKENS = _env_int("LLM_MAX_OUTPUT_TOKENS", 8192, minimum=256)
 
 # How much chain-of-thought the model is allowed to spend before answering.
 #
@@ -466,7 +498,7 @@ _MIN_USEFUL_OUTPUT_TOKENS = 2_000
 # and finding that out should not require editing code. `_shrink_on_overflow`
 # below is what makes raising it safe: if the ceiling turns out to be lower than
 # this, the request is retried smaller instead of failing.
-MAX_PDF_CHARS = int(os.environ.get("MAX_RECORD_CHARS", "100000"))
+MAX_PDF_CHARS = _env_int("MAX_RECORD_CHARS", 100_000, minimum=1_000)
 
 # Discovery reads the record ONCE PER TRIAL, so the cap above is multiplied by the
 # size of the shortlist: at four trials, 100,000 characters is ~156,000 tokens for
@@ -482,9 +514,7 @@ MAX_PDF_CHARS = int(os.environ.get("MAX_RECORD_CHARS", "100000"))
 #
 # Raise this to MAX_RECORD_CHARS once the provider is paid rather than free; the
 # multiplier stops mattering and deeper screening is strictly better.
-DISCOVERY_MAX_RECORD_CHARS = int(
-    os.environ.get("DISCOVERY_MAX_RECORD_CHARS", "40000")
-)
+DISCOVERY_MAX_RECORD_CHARS = _env_int("DISCOVERY_MAX_RECORD_CHARS", 40_000, minimum=1_000)
 
 MAX_TRIAL_CHARS = 30_000  # ~7.5k tokens of trial criteria text
 
@@ -608,8 +638,30 @@ def _generate_with_shrink(
     # Halving from 100,000 reaches ~12,500 characters, below any context window a
     # provider in this table plausibly has. Stopping sooner would leave a record
     # unanalysable on a provider that could have handled a smaller slice.
+    previous_size: Optional[int] = None
     for _ in range(4):
         fitted = _fit_record(record, limit)
+
+        # STOP IF SHRINKING CHANGED NOTHING.
+        #
+        # `_fit_record` returns the record untouched when it already fits, so
+        # halving a limit the record is nowhere near produces the identical
+        # prompt. Measured: a 3,000-character record against 25,000 characters
+        # of criteria sent the SAME 36,405-character prompt four times and paid
+        # for four rejections — because the overflow was the criteria, which
+        # this loop does not shrink.
+        #
+        # One attempt is the honest cost of an over-large limit. Four identical
+        # ones is just spending quota to be told the same thing again.
+        if previous_size is not None and len(fitted) == previous_size:
+            log.info(
+                "phase     shrink is a no-op at %d chars; the record is not the "
+                "thing that overflowed",
+                len(fitted),
+            )
+            break
+        previous_size = len(fitted)
+
         try:
             return _generate_structured_payload(build_prompt(fitted, criteria)), len(fitted)
         except RuntimeError as exc:
@@ -1594,7 +1646,21 @@ def _summarize_study(study: Dict[str, Any], near: str = "") -> Dict[str, Any]:
 
     # Match on any comma-separated part of the query, so "Tokyo, Japan",
     # "Japan" and "California" all hit.
-    needles = [p.strip().lower() for p in near.split(",") if p.strip()]
+    #
+    # WORD-BOUNDARY, NOT SUBSTRING. A plain `needle in haystack` test treats a
+    # two-letter state abbreviation as a wildcard: searching "Cleveland, OH"
+    # matched "J-OH-annesburg", "C-oh-asset" and "R-oh-nert Park", and because
+    # matches sort first, Johannesburg outranked Cleveland, Ohio for a search
+    # naming Cleveland. Every US state has a two-letter form, so this fired on
+    # the most ordinary input the field accepts.
+    # Anchored at the START of a word, open at the end. A trailing boundary too
+    # would drop the abbreviation itself — "OH" would stop matching "Ohio" — and
+    # a prefix is what a place name actually shares ("Calif" for "California").
+    needles = [
+        re.compile(rf"\b{re.escape(p.strip().lower())}")
+        for p in near.split(",")
+        if p.strip()
+    ]
 
     # The true number of participating sites, taken before any slicing or
     # deduplication. Counting the labels instead undercounted twice over: the list
@@ -1637,7 +1703,7 @@ def _summarize_study(study: Dict[str, Any], near: str = "") -> Dict[str, Any]:
         # Match against every component, including the ones not displayed, so a
         # search for a département or a US state still resolves.
         haystack = " ".join(p for p in (city, state, country) if p).lower()
-        if any(n in haystack for n in needles):
+        if any(n.search(haystack) for n in needles):
             # A site that is near but NOT YET RECRUITING cannot be walked into
             # today, so an open one outranks it. Both are kept — a site opening
             # soon is still worth a clinician knowing about.
@@ -1664,7 +1730,11 @@ def _summarize_study(study: Dict[str, Any], near: str = "") -> Dict[str, Any]:
         "url": f"https://clinicaltrials.gov/study/{nct}",
         "locations": ordered[:6],
         "site_count": site_count,
-        "nearby_count": len(nearby),
+        # BOTH buckets. Splitting nearby sites into open and not-yet-open left
+        # this counting only the second, so a trial whose every local site was
+        # actively recruiting reported "0 nearby" — the exact opposite of the
+        # truth, and only in the good case.
+        "nearby_count": len(nearby_open) + len(nearby),
     }
 
 
@@ -1764,7 +1834,13 @@ def _derive_search_terms(patient_text: str) -> SearchTerms:
         'Reply with JSON only: {"condition": "...", "keywords": ["...", "..."]}\n'
         'Use the common registry phrasing for "condition" (for example '
         '"non-small cell lung cancer", not "NSCLC adenocarcinoma stage IV").\n\n'
-        f"RECORD:\n{patient_text[:8000]}"
+        # `_fit_record`, not `[:8000]`. This is the same defect that was fixed in
+        # the scoring path and missed here: a plain prefix keeps the opening of
+        # the chart, and on a long record the diagnosis can sit past it. Deriving
+        # the search condition from the wrong half means every trial that follows
+        # is the wrong shortlist — a failure that looks like a bad model rather
+        # than a bad slice.
+        f"RECORD:\n{_fit_record(patient_text, 8000)}"
     )
     raw = _generate_structured_payload(prompt, system=SEARCH_TERMS_SYSTEM_MESSAGE)
     return SearchTerms.model_validate(_coerce_json(raw))
@@ -1911,7 +1987,11 @@ def _call_one_provider(
             },
             json={
                 "model": provider["model"],
-                "max_tokens": 8192,
+                # Was hardcoded 8192 while every other provider honoured its own
+                # `max_output_tokens`, so tuning that key did nothing here.
+                "max_tokens": int(
+                    provider.get("max_output_tokens") or LLM_MAX_OUTPUT_TOKENS
+                ),
                 "temperature": 0.1,
                 "system": system,
                 "messages": [{"role": "user", "content": prompt}],
@@ -2023,6 +2103,10 @@ def _call_one_provider(
         dropped: List[str] = []
         if response.status_code >= 400:
             body_text = response.text
+            # `max_tokens` is deliberately NOT in this list even though the
+            # comment above once claimed it was: dropping it would hand the
+            # request back to the provider's default, and Cloudflare's default
+            # of 256 is the exact failure this file exists to remember.
             dropped = [
                 key
                 for key in ("response_format", "reasoning_effort", "reasoning")
@@ -2960,4 +3044,19 @@ async def analyze(
 if __name__ == "__main__":  # pragma: no cover - convenience launcher
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # LOOPBACK, NOT 0.0.0.0.
+    #
+    # This service has no authentication by design, accepts clinical text, and
+    # spends a metered API budget on every request. Binding every interface put
+    # all three on the local network: anyone on the same cafe or campus wifi
+    # could POST to /api/analyze.
+    #
+    # CORS does not help — it constrains browsers, and the exposure here is a
+    # plain HTTP client. Override with HOST=0.0.0.0 only behind something that
+    # actually authenticates.
+    uvicorn.run(
+        "main:app",
+        host=os.environ.get("HOST", "127.0.0.1"),
+        port=int(os.environ.get("PORT", "8000")),
+        reload=True,
+    )
