@@ -91,29 +91,20 @@ The privacy pipeline is **real**, not simulated:
    the redacted text, optionally edits it, and ticks the confirmation box.
 4. Only the approved string is POSTed, as `patient_text`.
 
-### What the scrubber does NOT catch: measured, not estimated
+### What the scrubber still cannot guarantee
 
-The scrubber matches identifiers that have *structure*. It does not understand
-language, so anything that looks like ordinary English passes through. Tested
-against 11 Safe Harbor cases, **10 were not redacted**:
+The scrubber recognizes many structured identifiers plus high-confidence prose
+forms: relationship names, staff names with a role, residence phrasing, employers,
+and common facility names. It deliberately does **not** use a broad “every
+capitalized word is a name/place” rule because that would erase therapies,
+diagnoses, and medical terminology.
 
-| Input | Result |
-| --- | --- |
-| `...his wife Susan at bedside.` | passed through |
-| `Care coordinated by Karen Ellsworth, oncology navigator.` | passed through |
-| `Transferred from St. Aloysius Medical Center` | passed through |
-| `NORTHSIDE ONCOLOGY ASSOCIATES` (letterhead) | passed through |
-| `Patient resides in Cleveland` | passed through |
-| `Works as a machinist at Voss Precision Tooling.` | passed through |
-| `The patient is 94 and remains highly functional.` | passed through |
-| `Admitted the week of Thanksgiving 2025` | passed through |
-| `Reviewed by M.T.H. per protocol.` | passed through |
-| `One of two known cases of NUT carcinoma in the county registry.` | passed through |
-| `The patient is a 94-year-old female.` | **redacted** → `90 or older` |
-
-Bare first names, surnames without a title, facility names, cities, employers and
-quasi-identifiers all survive. Regex cannot tell `Susan` (a person) from
-`Sunitinib` (a drug); that needs a model, not more patterns.
+It can still miss bare names, unfamiliar facilities or locations, rare-disease
+descriptions, and re-identifying combinations of otherwise non-identifying facts.
+Regex cannot reliably distinguish a person such as `Susan` from a therapy such as
+`Sunitinib`. The review gate is therefore mandatory, and the app remains unsuitable
+for real patient records unless they have already been de-identified to an approved
+institutional standard.
 
 **Consequence: this does not meet HIPAA Safe Harbor**, which requires all 18
 identifier categories removed. Do not run real patient records through it on the

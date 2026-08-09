@@ -17,7 +17,7 @@ Every criterion resolves to met, blocked, or a gap, and each verdict carries the
 
 ## Running it
 
-Two processes. The backend needs a free API key from any OpenAI-compatible provider.
+Two processes. The backend uses OpenAI for analysis, with Groq and Cloudflare available as fallbacks.
 
 ```bash
 # backend  ->  http://localhost:8000
@@ -38,16 +38,17 @@ Requires Python 3.11+ and Node 18+.
 
 ### Keys
 
-`backend/.env` needs one provider. [Groq](https://console.groq.com/keys) and [Cloudflare Workers AI](https://dash.cloudflare.com/profile/api-tokens) both have free tiers with no card:
+`backend/.env` needs a fresh OpenAI key. In the default configuration, OpenAI is tried first; configured [Groq](https://console.groq.com/keys) and [Cloudflare Workers AI](https://dash.cloudflare.com/profile/api-tokens) credentials are used only if it fails:
 
 ```
-LLM_PROVIDER=groq
-GROQ_API_KEY=...
-CLOUDFLARE_ACCOUNT_ID=...      # optional second provider
-CLOUDFLARE_API_TOKEN=...       # used automatically if the first fails
+LLM_PROVIDER=openai
+OPENAI_API_KEY=...
+GROQ_API_KEY=...                # optional fallback
+CLOUDFLARE_ACCOUNT_ID=...       # optional fallback, required with token
+CLOUDFLARE_API_TOKEN=...        # optional fallback
 ```
 
-Any preset in `LLM_PRESETS` works. Every configured key becomes a fallback, so a rate-limited provider does not end a run.
+Do not commit `.env` or paste a key into frontend code. Any other configured preset in `LLM_PRESETS` is also a fallback, so a failed provider does not end a run.
 
 ## Tests
 

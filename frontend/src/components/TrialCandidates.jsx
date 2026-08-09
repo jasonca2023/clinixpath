@@ -207,7 +207,44 @@ export default function TrialCandidates({
 
   const candidates = Array.isArray(result.candidates) ? result.candidates : [];
 
+  const failedCount = Array.isArray(result.failed) ? result.failed.length : 0;
+
   if (candidates.length === 0) {
+    /* Two different empty states, and telling them apart is the whole point.
+       "Nothing matched" sends the clinician to widen the location. That is the
+       right advice only when the registry genuinely returned nothing — and it
+       was being shown when the registry returned four studies and the model
+       quota ran out before any of them could be scored. Widening the location
+       cannot fix a spent quota, so the page was confidently pointing at the one
+       thing that was not wrong. */
+    if (failedCount > 0) {
+      return (
+        <div className="max-w-[62ch] py-md text-left">
+          <h3 className="flex items-center gap-xs text-base font-semibold tracking-tight text-ink-2">
+            <AlertTriangle
+              className="h-4 w-4 shrink-0 text-hold"
+              strokeWidth={2}
+            />
+            Trials were found, but none could be scored
+          </h3>
+          <p className="mt-2 max-w-[52ch] text-sm leading-relaxed text-ink-3">
+            {result.failure_summary ||
+              `${failedCount} recruiting ${
+                failedCount === 1 ? "study" : "studies"
+              } matched, but the eligibility check did not complete for any of them.`}
+          </p>
+          <p className="mt-2 max-w-[52ch] text-sm leading-relaxed text-ink-3">
+            The search itself worked: {result.trials_screened ?? failedCount}{" "}
+            recruiting studies matched{" "}
+            <span className="font-mono text-ink-2">
+              {result.search_condition}
+            </span>
+            . Nothing is wrong with the record or the location.
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="max-w-[62ch] py-md text-left">
         <h3 className="flex items-center gap-xs text-base font-semibold tracking-tight text-ink-2">
@@ -298,11 +335,15 @@ export default function TrialCandidates({
         </div>
       )}
 
-      {Array.isArray(result.failed) && result.failed.length > 0 && (
+      {/* The COUNT alone reads as a defect in the tool. It was "3 studies could
+          not be scored" and nothing else, for a run whose only problem was a
+          free-tier quota that refills in a minute — so the one useful response,
+          waiting and pressing the button above, was undiscoverable. */}
+      {failedCount > 0 && (
         <p className="px-1 text-xs leading-relaxed text-ink-3">
-          {result.failed.length} stud{result.failed.length === 1 ? "y" : "ies"}{" "}
-          could not be scored and {result.failed.length === 1 ? "is" : "are"}{" "}
-          not listed above.
+          {result.failure_summary ||
+            `${failedCount} stud${failedCount === 1 ? "y" : "ies"} could not be
+             scored and ${failedCount === 1 ? "is" : "are"} not listed above.`}
         </p>
       )}
     </div>

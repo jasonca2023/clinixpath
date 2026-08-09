@@ -121,6 +121,20 @@ if not log.handlers:
 # Anthropic uses a different wire format and is handled separately.
 
 LLM_PRESETS: Dict[str, Dict[str, str]] = {
+    # OpenAI is the primary driver. It uses the standard Chat Completions wire
+    # format already used by this backend, while Groq and Cloudflare remain
+    # configured fallbacks when their credentials are available.
+    "openai": {
+        "base_url": "https://api.openai.com/v1",
+        # Kept on the established, schema-following model for this
+        # chat-completions implementation. Override with LLM_MODEL when needed.
+        "model": "gpt-4.1-mini",
+        "key_env": "OPENAI_API_KEY",
+        "signup": "https://platform.openai.com/api-keys",
+        # These parameters are not accepted by this model's chat-completions
+        # interface, so omit them on the first request rather than retrying.
+        "unsupported": "reasoning reasoning_effort",
+    },
     # Cloudflare Workers AI. Serves OpenAI's open-weight gpt-oss family on a
     # permanent free tier (10k neurons/day, no card) with no cold starts.
     #
@@ -178,11 +192,27 @@ LLM_PRESETS: Dict[str, Dict[str, str]] = {
         # combined, and Groq 413'd on essentially every real input.
         "tpm_limit": "8000",
     },
-    "openai": {
+    # The gpt-5 reasoning family, which speaks a DIFFERENT dialect of the same
+    # endpoint: `max_tokens` is refused in favour of `max_completion_tokens`, and
+    # temperature accepts only its default. Kept as a separate preset rather than
+    # branching on a model-name prefix, because the difference is a property of
+    # the model and belongs next to the model.
+    #
+    # Not reached unless explicitly selected: set LLM_PROVIDER=openai-reasoning
+    # with OPENAI_API_KEY already in .env.
+    "openai-reasoning": {
         "base_url": "https://api.openai.com/v1",
-        "model": "gpt-4o-mini",
+        "model": "gpt-5-mini",
         "key_env": "OPENAI_API_KEY",
         "signup": "https://platform.openai.com/api-keys",
+        "token_param": "max_completion_tokens",
+        # `reasoning_effort` IS honoured here — it is the one provider in this
+        # table where the key means what it says.
+        "reasoning_effort": "medium",
+        "unsupported": "reasoning temperature",
+        # A reasoning model spends output budget on its trace before it writes a
+        # character of the answer, so the ceiling has to clear both.
+        "max_output_tokens": "16384",
     },
     "together": {
         "base_url": "https://api.together.xyz/v1",
@@ -269,7 +299,7 @@ def _active_provider() -> Dict[str, str]:
                 for name, cfg in LLM_PRESETS.items()
                 if os.environ.get(cfg["key_env"], "").strip()
             ),
-            "groq",
+            "openai",
         )
 
     return _resolve_preset(chosen, primary=True)
@@ -311,6 +341,37 @@ def _resolve_preset(name: str, primary: bool) -> Dict[str, str]:
     return preset
 
 
+# Providers that have reported a spent DAILY allowance, and the moment each may
+# be tried again. Process-local and deliberately so: it is a cache of something
+# the provider told us, not state the app owns, and losing it on restart costs
+# exactly one wasted round-trip.
+#
+# Never used to decide clinical output — only which endpoint to dial.
+_EXHAUSTED_UNTIL: Dict[str, float] = {}
+
+
+class _ExhaustedView:
+    """Membership test over `_EXHAUSTED_UNTIL` that forgets expired entries."""
+
+    def __contains__(self, name: object) -> bool:
+        until = _EXHAUSTED_UNTIL.get(str(name))
+        if until is None:
+            return False
+        if time.monotonic() >= until:
+            del _EXHAUSTED_UNTIL[str(name)]
+            return False
+        return True
+
+
+_EXHAUSTED_TODAY = _ExhaustedView()
+
+
+def _mark_exhausted(name: str, seconds: int) -> None:
+    """Stand a provider down for the window it reported, capped at six hours."""
+    _EXHAUSTED_UNTIL[name] = time.monotonic() + min(max(seconds, 60), 6 * 3600)
+    log.info("provider  %s stood down for %ds (daily allowance spent)", name, seconds)
+
+
 def _provider_chain() -> List[Dict[str, str]]:
     """
     The ordered list of providers to try for a single analysis.
@@ -331,6 +392,19 @@ def _provider_chain() -> List[Dict[str, str]]:
     for name, cfg in LLM_PRESETS.items():
         if name in seen:
             continue
+        # This alternate OpenAI dialect deliberately shares OPENAI_API_KEY with
+        # the primary preset. It is opt-in, not an automatic fallback: after an
+        # OpenAI failure the next attempts should use independent Groq and
+        # Cloudflare capacity rather than charge a second OpenAI model.
+        if name == "openai-reasoning":
+            continue
+        if name in _EXHAUSTED_TODAY:
+            # Already told us its DAILY allowance is gone. Asking again cannot
+            # succeed before midnight UTC, and it is not free to ask: every trial
+            # in a discovery run was paying a full round-trip to be refused by a
+            # provider that had answered the same thing minutes earlier, and the
+            # run hit its total budget with trials still unscored because of it.
+            continue
         # Ollama needs no key, but it is local: silently falling back to a machine
         # that probably is not running one would trade a clear provider error for a
         # confusing connection refused.
@@ -346,6 +420,14 @@ def _provider_chain() -> List[Dict[str, str]]:
                 # primary, which is the opposite of what a fallback is for.
                 continue
             seen.add(name)
+
+    # The PRIMARY is stood down too, but only if something else can serve. A
+    # chain must never come back empty — with every provider out for the day the
+    # right answer is to try the configured one and report what it says, not to
+    # fail with no error to show. And once a standby is available, re-dialling an
+    # exhausted primary costs a wasted round-trip on every single call.
+    if len(chain) > 1 and primary["name"] in _EXHAUSTED_TODAY:
+        chain = chain[1:]
 
     return chain
 
@@ -396,6 +478,16 @@ LLM_TOTAL_TIMEOUT_SECONDS = 150
 # change this, change that.
 DISCOVERY_TOTAL_TIMEOUT_SECONDS = 300
 
+# Attempts per trial, and the longest a retry will wait for a rate limit to lift.
+#
+# Three attempts rather than two because a free-tier token bucket takes about
+# twenty seconds to refill and there is no point spending the run's only retry
+# inside that window. 30 seconds is the cap: it clears a per-minute bucket with
+# room to spare, and anything longer is a per-DAY cap, which reports hours and is
+# not something a single run can wait out.
+RETRIES_PER_TRIAL = 3
+MAX_RETRY_WAIT_SECONDS = 30.0
+
 # How many trials are scored in parallel.
 #
 # This was 2, chosen defensively when the concern was "free tiers rate-limit
@@ -441,6 +533,32 @@ def _env_int(name: str, default: int, minimum: int = 1) -> int:
 
 
 DISCOVERY_CONCURRENCY = _env_int("DISCOVERY_CONCURRENCY", 2)
+
+
+def _effective_concurrency() -> int:
+    """
+    How many trials the CHAIN AS IT STANDS can genuinely score at once.
+
+    The setting above is a ceiling, not a promise. A provider that declares
+    `tpm_limit` is charged prompt + max_tokens against a per-minute bucket at
+    request time, and `_call_one_provider` sizes the reservation to whatever is
+    left of that bucket — so one call books essentially all of it. A second
+    concurrent call is not queued behind the first, it is REFUSED.
+
+    When every provider still standing works that way, 2 does not double the
+    throughput; it halves the success rate and manufactures the 429s the retry
+    then has to wait out. Measured on a four-trial run once the Cloudflare
+    fallback had spent its daily neurons: three of the four failed, every one of
+    them to a self-inflicted collision, and the page reported one ranked trial.
+
+    So this is arithmetic, not tuning, and it is computed per run rather than at
+    import: which providers are usable changes during the day.
+    """
+    chain = _provider_chain()
+    if chain and all(p.get("tpm_limit") for p in chain):
+        return 1
+    return DISCOVERY_CONCURRENCY
+
 
 # Default number of trials to score per run. Six meant seven model calls; on a
 # queue where one call is ~86s that is minutes of wall clock for results the user
@@ -1044,6 +1162,15 @@ class DiscoveryPayload(BaseModel):
         default_factory=list,
         description="Trials that could not be scored, with the reason.",
     )
+    # One plain sentence naming why they failed, empty when none did.
+    #
+    # `failed` is diagnostic: it carries NCT ids and provider strings that mean
+    # something to whoever is running the server and nothing to a clinician. The
+    # page was rendering only the count — "3 studies could not be scored" — which
+    # reads as a bug in the tool when the truth was a spent free-tier quota, and
+    # leaves the one honest response (wait a minute, press the button again)
+    # undiscoverable.
+    failure_summary: str = ""
     truncation: TruncationNotice = Field(default_factory=TruncationNotice)
 
 
@@ -1900,6 +2027,80 @@ def _extract_provider_error(response: "requests.Response") -> str:
     return detail
 
 
+# How each provider words a spent DAILY allowance, as opposed to a per-minute
+# bucket. Kept together because two places have to agree on the answer, and they
+# did not: one tested for "daily" and Groq says "tokens per day (TPD)", so the
+# fast path missed it and slept twenty seconds per attempt waiting out a limit
+# that had forty minutes left on it.
+#
+# Matched against the provider's own message. Nothing read here is ever surfaced.
+_DAILY_CAP_PHRASES = ("daily", "per day", "per-day", "tpd", "allocation")
+
+
+def _is_daily_cap(response: "requests.Response") -> bool:
+    """True when a 429 is a per-DAY allowance rather than a per-minute bucket."""
+    if "day" in response.headers.get("x-ratelimit-type", "").lower():
+        return True
+    body = _extract_provider_error(response).lower()
+    return any(phrase in body for phrase in _DAILY_CAP_PHRASES)
+
+
+class ProviderRateLimited(RuntimeError):
+    """
+    A 429 from a provider, carrying the wait it asked for.
+
+    The reset window used to live only inside the message string. That read fine
+    in a log and was useless to the retry: Groq answered "resets in about 18
+    seconds" and the caller slept a flat 2.0, so the retry hit the same closed
+    window and the trial was dropped. Measured on a four-trial run against a
+    single provider — three of the four failed this way and every one of them
+    scored fine when re-sent by hand a few seconds later.
+
+    `retry_after` is seconds, 0 when the provider did not say.
+    """
+
+    def __init__(self, message: str, retry_after: int = 0) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _retry_delay(stated_wait: int, remaining: Optional[float] = None) -> float:
+    """
+    How long to wait before retrying, in seconds. <= 0 means "do not retry".
+
+    A function rather than an expression inline in the retry loop, because the
+    behaviour is the fix and a fix that cannot be tested is a fix that comes
+    back: the previous version slept a flat 2.0 against a stated 18 and dropped
+    three of four trials on a measured run.
+
+    `stated_wait` is what the provider asked for, 0 when it said nothing.
+    `remaining` is seconds left in the run's budget, None for unbounded.
+    """
+    # Never shorter than the old fixed pause — a provider that names no window
+    # still deserves a beat before being asked again.
+    wait = min(max(float(stated_wait), 2.0), MAX_RETRY_WAIT_SECONDS)
+    if remaining is not None:
+        # Waking with no budget left to make the call spends the wait for
+        # nothing, so a wait that outlasts the run is not worth starting.
+        wait = min(wait, remaining)
+    return wait
+
+
+def _retry_after_of(exc: BaseException) -> int:
+    """
+    Seconds this exception says to wait, or 0 for "no idea".
+
+    Reads the attribute the chain propagates. Falls back to parsing our own
+    "Resets in about N seconds" phrasing, which is what survives when an error
+    has been re-wrapped somewhere between the provider and the retry.
+    """
+    direct = getattr(exc, "retry_after", 0)
+    if isinstance(direct, int) and direct > 0:
+        return direct
+    match = re.search(r"resets in about (\d+) seconds?", str(exc), re.I)
+    return int(match.group(1)) if match else 0
+
+
 def _generate_structured_payload(prompt: str, system: str = SYSTEM_MESSAGE) -> str:
     """
     Produce the raw JSON string for one analysis, trying each configured provider.
@@ -1921,6 +2122,10 @@ def _generate_structured_payload(prompt: str, system: str = SYSTEM_MESSAGE) -> s
     """
     chain = _provider_chain()
     errors: List[str] = []
+    # The SHORTEST wait any provider asked for. A chain is only worth retrying as
+    # fast as its quickest member recovers, and taking the longest would idle
+    # behind a provider the retry no longer needs.
+    waits: List[int] = []
 
     for provider in chain:
         started = time.monotonic()
@@ -1943,15 +2148,23 @@ def _generate_structured_payload(prompt: str, system: str = SYSTEM_MESSAGE) -> s
                 _safe_error(exc),
             )
             errors.append(f"{provider['name']}: {exc}")
+            if wait := _retry_after_of(exc):
+                waits.append(wait)
             continue
 
     if len(errors) == 1:
         # Single provider configured: surface its error verbatim, unchanged from
         # the pre-fallback behaviour so existing messages stay recognisable.
-        raise RuntimeError(errors[0].split(": ", 1)[1])
-    raise RuntimeError(
-        f"All {len(chain)} configured providers failed — " + " | ".join(errors)
-    )
+        failure: RuntimeError = RuntimeError(errors[0].split(": ", 1)[1])
+    else:
+        failure = RuntimeError(
+            f"All {len(chain)} configured providers failed — " + " | ".join(errors)
+        )
+    # Carried on the aggregate so the caller can wait the window out. Without
+    # this the number the provider handed us dies at the edge of this function
+    # and every retry above guesses.
+    failure.retry_after = min(waits) if waits else 0  # type: ignore[attr-defined]
+    raise failure
 
 
 def _call_one_provider(
@@ -2017,6 +2230,14 @@ def _call_one_provider(
         if body.get("stop_reason") == "max_tokens":
             raise RuntimeError("anthropic truncated its response at the token ceiling.")
     else:
+        # What THIS provider calls the output ceiling. OpenAI's reasoning models
+        # refuse `max_tokens` outright — "Unsupported parameter: 'max_tokens' is
+        # not supported with this model. Use 'max_completion_tokens' instead" —
+        # and the drop-and-retry below cannot rescue that, because the ceiling is
+        # the one parameter that must never be dropped. Named per preset rather
+        # than sniffed from the model string so a new model name cannot silently
+        # take the wrong branch.
+        token_key = provider.get("token_param") or "max_tokens"
         payload: Dict[str, Any] = {
             "model": provider["model"],
             "temperature": 0.1,
@@ -2024,7 +2245,7 @@ def _call_one_provider(
             # is 256 tokens, which a reasoning model spends entirely on its trace.
             # Per-provider, because the same weights behave differently on
             # different serving stacks — see the notes in LLM_PRESETS.
-            "max_tokens": int(
+            token_key: int(
                 provider.get("max_output_tokens") or LLM_MAX_OUTPUT_TOKENS
             ),
             # gpt-oss and other reasoning models honour this; gateways that do
@@ -2078,7 +2299,7 @@ def _call_one_provider(
                     f"{provider['name']} has no room for this request: "
                     f"~{estimated_prompt} prompt tokens against a {tpm} TPM limit."
                 )
-            payload["max_tokens"] = min(payload["max_tokens"], remaining)
+            payload[token_key] = min(payload[token_key], remaining)
 
         response = requests.post(
             f"{provider['base_url']}/chat/completions",
@@ -2128,7 +2349,10 @@ def _call_one_provider(
                 timeout=LLM_TIMEOUT_SECONDS,
             )
 
-        if response.status_code == 429:
+        # A spent DAILY allowance is not throttling, and the pause below cannot
+        # outlast it. Skipping straight to the report saves a 20-second sleep and
+        # a round-trip on every call for the rest of the day.
+        if response.status_code == 429 and not _is_daily_cap(response):
             # Free tiers throttle hard. Honour Retry-After when given, otherwise a
             # short fixed pause, then try once more before giving up.
             wait = 0.0
@@ -2167,24 +2391,59 @@ def _call_one_provider(
                 when = f"about {secs} seconds"
             else:
                 when = "an unknown period"
-            daily = "day" in kind.lower()
+            daily = _is_daily_cap(response)
+            if daily:
+                # Stand it down so the REST of the run stops dialling it. Without
+                # this, every remaining trial pays a full round-trip to be told
+                # the same thing, and the run can spend its whole budget that way.
+                _mark_exhausted(provider["name"], secs or 3600)
             # Names the providers actually configured. The previous text listed
             # GitHub Models IDs (gpt-4.1-mini, mistral-small-2503) left over from
             # an earlier provider, so it advised setting LLM_MODEL to models that
             # do not exist on Groq or Cloudflare — advice that cannot work is
             # worse than no advice.
-            others = [p for p in LLM_PRESETS if p != provider["name"]]
-            hint = (
-                "This is a per-model daily cap, so a different model or provider "
-                "gives a fresh allowance immediately. Configured fallbacks: "
-                f"{', '.join(others[:3])}. Set LLM_PROVIDER in backend/.env."
-                if daily
-                else "Retry shortly, or set LLM_PROVIDER in backend/.env to a "
-                "provider with a separate bucket."
-            )
-            raise RuntimeError(
+            # Only providers that could ACTUALLY serve the next call: a key in the
+            # environment, not the one that just refused, and not already stood
+            # down for its own daily cap. This listed every preset in the table,
+            # so a run with two exhausted providers advised setting LLM_PROVIDER
+            # to openai and together — neither of which had a key. Advice that
+            # cannot work is worse than no advice.
+            others = [
+                name
+                for name, cfg in LLM_PRESETS.items()
+                if name != provider["name"]
+                and name != "ollama"
+                and name not in _EXHAUSTED_TODAY
+                and os.environ.get(cfg["key_env"], "").strip()
+            ]
+            if daily:
+                hint = (
+                    "This is a per-model daily cap, so a different provider gives "
+                    "a fresh allowance immediately. "
+                    + (
+                        f"Configured and still usable: {', '.join(others[:3])}. "
+                        "Set LLM_PROVIDER in backend/.env."
+                        if others
+                        else "Every configured provider is out for today; add "
+                        "another key to backend/.env, or wait for the reset."
+                    )
+                )
+            else:
+                hint = (
+                    "Retry shortly"
+                    + (
+                        f", or set LLM_PROVIDER in backend/.env to {others[0]}."
+                        if others
+                        else "; it is a per-minute bucket and refills on its own."
+                    )
+                )
+            raise ProviderRateLimited(
                 f"{provider['name']} rate limit reached (HTTP 429"
-                f"{', ' + kind if kind else ''}). Resets in {when}. {hint}"
+                f"{', ' + kind if kind else ''}). Resets in {when}. {hint}",
+                # A daily cap is not something a run can wait out, so it reports
+                # no wait at all rather than a six-hour one the caller would
+                # have to special-case.
+                retry_after=0 if daily else secs,
             )
 
         if response.status_code != 200:
@@ -2213,7 +2472,7 @@ def _call_one_provider(
         if choice.get("finish_reason") == "length":
             raise RuntimeError(
                 f"{provider['name']} truncated its response at the "
-                f"{payload['max_tokens']}-token ceiling."
+                f"{payload[token_key]}-token ceiling."
             )
 
     if not raw_text or not raw_text.strip():
@@ -2416,7 +2675,8 @@ async def _score_one_trial(
     # `break` before any exception is raised, and the log line after the loop
     # reads this unconditionally.
     safe_error = "deadline"
-    for attempt in range(2):
+    stated_wait = 0
+    for attempt in range(RETRIES_PER_TRIAL):
         if deadline is not None and time.monotonic() >= deadline:
             last_error = (
                 "skipped: the discovery run passed its "
@@ -2474,9 +2734,30 @@ async def _score_one_trial(
                 # only the safe form is written to the log.
                 last_error = f"{type(exc).__name__}: {exc}"
                 safe_error = _safe_error(exc)
-        if attempt == 0:
+                stated_wait = _retry_after_of(exc)
+        if attempt < RETRIES_PER_TRIAL - 1:
+            # WAIT AS LONG AS THE PROVIDER ASKED, NOT A FIXED TWO SECONDS.
+            #
+            # A free-tier token bucket refills on its own clock and says so in
+            # the 429. Sleeping 2.0 against a stated 18 meant the retry arrived
+            # inside the same closed window, failed identically, and the trial
+            # was reported unscorable — for a run whose only real problem was
+            # that it asked again too soon.
+            #
+            # Capped, because a daily cap reports hours and no run waits that
+            # out; those come through as 0 and fall back to the short sleep.
+            wait = _retry_delay(
+                stated_wait,
+                None if deadline is None else deadline - time.monotonic(),
+            )
+            if wait <= 0:
+                break
+            log.info(
+                "trial wait %-13s %4.1fs before attempt %d  (%s)",
+                meta["nct_id"], wait, attempt + 2, safe_error,
+            )
             # Outside the semaphore so a sleeping retry does not hold a slot.
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(wait)
 
     if say:
         say(
@@ -2494,6 +2775,95 @@ async def _score_one_trial(
     )
     failures.append(f"{meta['nct_id']} ({last_error[:120]})")
     return None
+
+
+def _condense_chain_error(exc: BaseException) -> str:
+    """
+    Reduce the chain's aggregate error to one sentence when every branch agrees.
+
+    The aggregate is built for a log: "All 2 configured providers failed — groq:
+    ... | cloudflare: ...", each half carrying its own reset window and its own
+    copy of "Set LLM_PROVIDER in backend/.env". That is the right level of detail
+    for whoever runs the server and roughly 600 characters of it lands in a
+    dialog on the clinician's screen, where the one fact that matters — there is
+    no model capacity until the quota resets — is buried in the middle.
+
+    Only collapsed when every provider failed the SAME way. A mixed chain keeps
+    its full text, because then the detail is what makes it diagnosable.
+    """
+    text = str(exc)
+    lowered = text.lower()
+    if "configured providers failed" not in lowered:
+        return text
+
+    segments = [s for s in text.split("—", 1)[-1].split(" | ") if s.strip()]
+    if len(segments) < 2:
+        return text
+
+    if all("rate limit" in s.lower() for s in segments):
+        if all(
+            any(p in s.lower() for p in _DAILY_CAP_PHRASES) for s in segments
+        ):
+            return (
+                "every configured model provider has spent its free allowance "
+                "for today. They reset on their own; adding another key to "
+                "backend/.env gives a fresh allowance immediately."
+            )
+        return (
+            "every configured model provider is rate-limited right now. These "
+            "are per-minute buckets, so waiting about a minute and trying again "
+            "usually clears it."
+        )
+    return text
+
+
+def _summarize_failures(failures: List[str], total: int) -> str:
+    """
+    Turn the raw failure strings into one sentence a clinician can act on.
+
+    Written from the DOMINANT cause, because a list of four differently-worded
+    provider errors is not more informative than one accurate sentence — it is
+    less. Ranked by what the reader can do about it: a quota that refills in a
+    minute is a different instruction from a registry outage.
+
+    Nothing from a provider's response body reaches this string. The phrases it
+    matches are ours, set at the raise sites above.
+    """
+    if not failures:
+        return ""
+
+    blob = " ".join(failures).lower()
+    # The noun agrees with the TOTAL, not the failure count: "1 of 4 studies".
+    unscored = (
+        f"{len(failures)} of {total} "
+        f"{'study' if total == 1 else 'studies'} could not be scored"
+    )
+
+    if "daily" in blob or "allocation" in blob:
+        return (
+            f"{unscored}: the free model quota for today is spent. It resets "
+            "overnight, or add a second provider key in backend/.env."
+        )
+    if "rate limit" in blob or "429" in blob or "no room for this request" in blob:
+        return (
+            f"{unscored}: the model provider's per-minute limit was reached. "
+            "Wait about a minute and press Screen more trials — the studies "
+            "already scored are kept."
+        )
+    if "clinicaltrials.gov" in blob or "httperror" in blob:
+        return (
+            f"{unscored}: ClinicalTrials.gov did not return their criteria. "
+            "This is usually momentary — press Screen more trials to retry."
+        )
+    if "budget" in blob or "timeout" in blob or "deadline" in blob:
+        return (
+            f"{unscored}: the run reached its time budget first. Press Screen "
+            "more trials to continue where it stopped."
+        )
+    return (
+        f"{unscored}. Press Screen more trials to retry them; the studies "
+        "already scored are kept."
+    )
 
 
 async def _run_discovery(
@@ -2595,7 +2965,7 @@ async def _run_discovery(
                 raise HTTPException(
                     status_code=502,
                     detail=(
-                        f"Could not derive a search condition: {exc} "
+                        f"Could not derive a search condition: {_condense_chain_error(exc)} "
                         "You can also type the condition into the search field to "
                         "skip this step entirely."
                     ),
@@ -2694,7 +3064,8 @@ async def _run_discovery(
         # burst of parallel calls is the fastest way to get throttled mid-demo.
         _say("screening", total=len(shortlist))
         failures: List[str] = []
-        semaphore = asyncio.Semaphore(DISCOVERY_CONCURRENCY)
+        concurrency = _effective_concurrency()
+        semaphore = asyncio.Semaphore(concurrency)
         deadline = time.monotonic() + DISCOVERY_TOTAL_TIMEOUT_SECONDS
         scored = await asyncio.gather(
             *(
@@ -2723,7 +3094,7 @@ async def _run_discovery(
             time.monotonic() - run_started,
             len(candidates),
             len(shortlist),
-            DISCOVERY_CONCURRENCY,
+            concurrency,
             _active_provider()["model"],
         )
 
@@ -2752,6 +3123,7 @@ async def _run_discovery(
             trials_screened=len(shortlist),
             candidates=candidates,
             failed=failures,
+            failure_summary=_summarize_failures(failures, len(shortlist)),
             truncation=truncation,
         )
     finally:

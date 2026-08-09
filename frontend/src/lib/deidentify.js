@@ -86,6 +86,24 @@ const PROTECTED_PATTERNS = [
   /\bECOG\s*(?:PS\s*)?[0-4]\b/gi,
   // Relative intervals carry trial-relevant meaning and are not dates.
   /\b\d+\s*(?:day|days|week|weeks|month|months|year|years)\s*(?:ago|prior|previously|earlier)\b/gi,
+  // ANATOMY. Capitalised anatomic sites read exactly like place names to every
+  // proper-noun rule below, and losing one is losing the diagnosis: a trial that
+  // asks for a lobar primary cannot be matched against a tumour with no site.
+  // Vaulted rather than excluded rule-by-rule, so a future geography or name
+  // pattern cannot reintroduce the same failure.
+  /\b(?:Right|Left|Bilateral|Upper|Middle|Lower|Proximal|Distal|Anterior|Posterior|Superior|Inferior)(?:\s+(?:Right|Left|Upper|Middle|Lower|Outer|Inner))?\s+(?:Lobe|Lung|Quadrant|Extremity|Breast|Kidney|Adrenal|Ovary|Lymph\s+Node|Hilar\s+Lymph\s+Node|Hilum|Axilla|Pole)\b/g,
+  /\b(?:Liver|Lung|Bone|Brain|Adrenal\s+Gland|Pleura|Peritoneum|Lymph\s+Node|Bone\s+Marrow|Pancreas|Spleen|Kidney|Colon|Rectum|Oesophagus|Esophagus|Stomach|Thyroid|Prostate|Bladder|Cervix|Uterus|Ovary)\b/g,
+  // Levels of care read as institutions and are not identifying.
+  /\b(?:Intensive\s+Care\s+Unit|Coronary\s+Care\s+Unit|Emergency\s+Department|Post-?Anaesthesia\s+Care\s+Unit|Medical\s+Oncology|Radiation\s+Oncology|Palliative\s+Care)\b/gi,
+  // Named clinical scales. Spelled out they are three capitalised words in a
+  // row, which is indistinguishable from a person to any pattern that has to
+  // guess — "Participant is Eastern Cooperative Oncology Group status 1" lost
+  // the scale it was naming.
+  /\b(?:Eastern\s+Cooperative\s+Oncology\s+Group|Karnofsky\s+Performance\s+Status|Response\s+Evaluation\s+Criteria\s+In\s+Solid\s+Tumou?rs|Common\s+Terminology\s+Criteria\s+for\s+Adverse\s+Events|New\s+York\s+Heart\s+Association|World\s+Health\s+Organization)\b/gi,
+  // NDC is a DRUG PRODUCT code, not a patient identifier, and it is ten digits
+  // — so the bare ten-digit contact rule below claimed it and reported the
+  // medication as a redacted phone number.
+  /\bNDC\s*[:#]?\s*\d{4,5}-?\d{3,4}-?\d{1,2}\b/gi,
 ];
 
 const SENTINEL_OPEN = "";
@@ -161,6 +179,14 @@ const RULES = [
     pattern: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,
     replace: () => "[IP REDACTED]",
   },
+  {
+    category: "Vehicle / Device",
+    // UUIDs and MAC addresses are device identifiers under Safe Harbor. They
+    // appear in portal and imaging metadata without a helpful field label.
+    pattern:
+      /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b|\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\b/gi,
+    replace: () => "[DEVICE ID REDACTED]",
+  },
   // Labelled SSN first, so an undashed one is caught by its label.
   {
     category: "SSN",
@@ -216,6 +242,13 @@ const RULES = [
   },
   {
     category: "Phone / Fax",
+    // Portal exports often collapse contact numbers to ten consecutive digits.
+    // A ten-digit number is safer treated as contact information than preserved.
+    pattern: /\b\d{10}\b/g,
+    replace: () => "[PHONE REDACTED]",
+  },
+  {
+    category: "Phone / Fax",
     // [^\S\n] is horizontal whitespace only; plain \s would swallow the newline
     // and glue the next field onto this one.
     pattern:
@@ -255,6 +288,18 @@ const RULES = [
   },
   {
     category: "Date",
+    // Full dates above run first. These rules catch dates written without a
+    // year, while preserving year-only information for clinical chronology.
+    pattern: new RegExp(`\\b${MONTHS}\\.?\\s+\\d{1,2}\\b(?!,?\\s*\\d{4})`, "gi"),
+    replace: () => "[DATE REDACTED]",
+  },
+  {
+    category: "Date",
+    pattern: new RegExp(`\\b\\d{1,2}\\s+${MONTHS}\\.?\\b(?!,?\\s*\\d{4})`, "gi"),
+    replace: () => "[DATE REDACTED]",
+  },
+  {
+    category: "Date",
     // Month + year with no day still narrows a patient more than the year alone.
     pattern: new RegExp(`\\b${MONTHS}\\.?\\s+(\\d{4})\\b`, "gi"),
     replace: (_m, y) => `[DATE: ${y}]`,
@@ -277,6 +322,26 @@ const RULES = [
     pattern:
       /\b(address|residence|resides at|city|town|county|province|state|zip|postal code)\s*[:#]\s*[^\n]*?(?=$|\n|[ \t]{2,}|[ \t]+[A-Z][a-z]+[ \t]*:|[.;][ \t]+[A-Z])/gi,
     replace: labelled("[REDACTED]"),
+  },
+  {
+    category: "Geography",
+    // City names in prose lack both a field label and a state abbreviation, so
+    // the trigger has to be RESIDENCE language and nothing wider.
+    //
+    // "located" and "transferred" were in this list and are the two words an
+    // oncology note uses for anatomy and for level of care. The cost was exactly
+    // what the header of this file forbids — destroying clinical meaning,
+    // silently: "Mass located in Right Upper Lobe" became "Mass located in
+    // [GEOGRAPHY REDACTED]", "Lesion located at Left Hilar Lymph Node" lost the
+    // station, and "transferred from Intensive Care Unit" lost the unit. A
+    // tumour with no site cannot be matched against a trial that asks for one.
+    //
+    // A facility genuinely named after a transfer is still caught downstream by
+    // the institution rule, which keys on "Hospital"/"Medical Center" and does
+    // not have to guess.
+    pattern:
+      /\b((?:[Rr]esides?|[Rr]esided|[Ll]ives?|[Ll]ived|[Ll]iving|[Rr]elocated|[Mm]oved)\s+(?:in|at|to|from)\s+)(?:the\s+city\s+of\s+)?[A-Z][\w'.-]*(?:\s+[A-Z][\w'.-]*){0,3}\b/g,
+    replace: (_m, lead) => `${lead}[GEOGRAPHY REDACTED]`,
   },
   {
     category: "Address",
@@ -312,7 +377,7 @@ const RULES = [
     // A facility name is an indirect identifier. Service lines are not, so a
     // department word in the leading position is excluded.
     pattern: new RegExp(
-      `\\b(?!(?:${DEPARTMENTS})\\b)[A-Z][\\w'-]+(?:\\s+[A-Z][\\w'-]+){0,3}\\s+(?:Hospital|Medical Cent(?:er|re)|Health System|Healthcare|Clinic|Cancer Cent(?:er|re)|Infirmary|Associates|Physicians|Partners)\\b`,
+      `\\b(?!(?:${DEPARTMENTS})\\b)[A-Z][\\w'.-]+(?:\\s+[A-Z][\\w'.-]+){0,3}\\s+(?:Hospital|Medical Cent(?:er|re)|Health System|Healthcare|Clinic|Cancer Cent(?:er|re)|Infirmary|Associates|Physicians|Partners)\\b`,
       "g",
     ),
     replace: () => "[INSTITUTION REDACTED]",
@@ -339,6 +404,62 @@ const RULES = [
     pattern:
       /\b(Patient(?: Name)?|Name|Surname|Family Name|Given Name|Guardian|Next of Kin|Emergency Contact|Physician|Provider|Attending|Referring(?: Physician)?|Ordering(?: Provider)?|Signed by|Dictated by|Spouse|Mother|Father|Son|Daughter|Sibling|Caregiver|Contact)\s*[:#]\s*[A-Z][\w'.-]*(?:[ \t]+[A-Z][\w'.-]*){0,4}/gi,
     replace: labelled("[NAME REDACTED]"),
+  },
+  {
+    category: "Name",
+    // "his wife Susan" is a common narrative form. Keep the relationship for
+    // clinical context and remove the capitalised name only.
+    //
+    // Both cases spelled out per word rather than a /i flag on the rule: the
+    // name half depends on `[A-Z]` meaning a capital, and /i would take that
+    // away. Lowercase-only triggers leaked every sentence-initial occurrence,
+    // and a chart writes plenty of them — "Wife Susan was at bedside", "Daughter
+    // Rebecca provides transport" both published the name.
+    pattern:
+      /\b((?:[Ww]ife|[Hh]usband|[Ss]pouse|[Pp]artner|[Mm]other|[Ff]ather|[Ss]on|[Dd]aughter|[Ss]ibling|[Cc]aregiver)\s+(?:named\s+)?)(?:[A-Z][a-z'’-]+(?:\s+[A-Z][a-z'’-]+){0,2})\b/g,
+    replace: (_m, lead) => `${lead}[NAME REDACTED]`,
+  },
+  {
+    category: "Name",
+    // A role suffix gives a reliable boundary for an otherwise unlabelled
+    // staff name: "Karen Ellsworth, oncology navigator".
+    //
+    // NOT case-insensitive, and that is the whole point. This carried a /i flag,
+    // under which `[A-Z]` and `[a-z]` both match either case — so the pattern
+    // stopped meaning "a capitalised word" and started meaning "any word", and
+    // it ate the word in front of the name: "Care coordinated by Karen
+    // Ellsworth" redacted to "Care coordinated [NAME REDACTED]". The role words
+    // are the only part that genuinely varies in case, so they carry the
+    // alternation and the name keeps its capital.
+    pattern:
+      /\b[A-Z][a-z'’-]+(?:\s+[A-Z][a-z'’-]+){1,2}(?=,\s*(?:[Oo]ncology\s+)?(?:[Nn]avigator|[Cc]oordinator|[Ss]ocial\s+[Ww]orker|[Cc]ase\s+[Mm]anager|[Nn]urse|[Pp]hysician|[Cc]linician|[Tt]herapist|[Ii]nterpreter)\b)/g,
+    replace: () => "[NAME REDACTED]",
+  },
+  {
+    category: "Name",
+    // Requiring two normal name words avoids treating "Patient is Stage IV" as
+    // a person while catching "Patient is Alice Smith".
+    //
+    // Case-sensitive for the same reason as the rule above. Under /i this ate
+    // the word AFTER the name too — "Patient is Alice Smith with EGFR mutation"
+    // lost "with" — and matched clinical prose outright: "Patient is stage four
+    // with progressive disease" became "Patient is [NAME REDACTED] progressive
+    // disease", and "Participant is Eastern Cooperative Oncology Group" lost the
+    // scale it was naming. Staging spelled in words is not protected by the
+    // vault the way "Stage IV" is, so nothing downstream caught it.
+    pattern:
+      /\b((?:[Pp]atient|[Ss]ubject|[Pp]articipant)\s+(?:is|was|named)\s+)[A-Z][a-z'’-]+(?:\s+[A-Z][a-z'’-]+){1,2}\b/g,
+    replace: (_m, lead) => `${lead}[NAME REDACTED]`,
+  },
+  {
+    category: "Institution",
+    // Employer names can identify a patient. This form stays contextual rather
+    // than using a broad proper-noun rule that would erase medical terminology.
+    // Case spelled per word for the reason given on the relationship rule above:
+    // "Works at Voss Precision Tooling." published the employer outright.
+    pattern:
+      /\b((?:[Ww]orks?|[Ee]mployed|[Ee]mployment)\s+(?:at|for)\s+)[A-Z][\w'.-]*(?:\s+[A-Z][\w'.-]*){0,3}\b/g,
+    replace: (_m, lead) => `${lead}[EMPLOYER REDACTED]`,
   },
   // Titled names in narrative text: Dr. Alice Chen · Mr. J. Doe · Mrs. M. Ruiz.
   // The middle-initial case is why the optional-initial group exists: the old

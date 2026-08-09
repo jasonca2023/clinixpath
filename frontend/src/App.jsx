@@ -433,6 +433,10 @@ function Console() {
         trials_screened: (prev?.trials_screened ?? 0) + (payload?.trials_screened ?? 0),
         candidates: [...(prev?.candidates ?? []), ...(payload?.candidates ?? [])],
         failed: [...(prev?.failed ?? []), ...(payload?.failed ?? [])],
+        // Describes THIS press, not the accumulated total. Carrying the old
+        // sentence forward would keep telling the clinician the quota was
+        // spent after the press that proved it had refilled.
+        failure_summary: payload?.failure_summary ?? "",
       }));
     } catch (caught) {
       if (abortRef.current?.signal.aborted) return;

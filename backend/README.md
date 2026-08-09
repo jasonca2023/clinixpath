@@ -47,8 +47,8 @@ pip install -r requirements.txt
 
 ## 2. Configure the API key
 
-ClinixPath needs exactly **one** model API key, from any supported provider. Drop it in
-`.env` and the backend detects which one you used: no code change.
+ClinixPath uses **OpenAI as its primary model provider**. Put a newly created key in
+`.env`; Groq, Cloudflare, and other configured providers are automatic fallbacks.
 
 | Provider | Cost | Signup |
 | --- | --- | --- |
@@ -60,10 +60,11 @@ ClinixPath needs exactly **one** model API key, from any supported provider. Dro
 | OpenAI | paid | <https://platform.openai.com/api-keys> |
 | **Ollama** | **free, offline, no signup** | `brew install ollama` |
 
-Then:
+Configure OpenAI first:
 
 ```bash
-export GROQ_API_KEY="your_key_here"
+export LLM_PROVIDER="openai"
+export OPENAI_API_KEY="your_new_key_here"
 ```
 
 Or use a `.env` file, `main.py` loads `backend/.env` automatically on startup
@@ -74,11 +75,11 @@ cp .env.example .env
 # edit .env and paste your key, then just start the server: no export needed.
 ```
 
-Get a free key at <https://console.groq.com/keys>. No credit card, and the free tier is
-enough to run this app.
+For fallback capacity, add `GROQ_API_KEY` and/or `CLOUDFLARE_API_TOKEN` (plus
+`CLOUDFLARE_ACCOUNT_ID`) to the same `.env`. The backend tries OpenAI first, then
+configured fallbacks. Keep `.env` local and never commit keys.
 
-If you later see `model not found`, Groq has retired that model ID: pick a current one
-from <https://console.groq.com/docs/models> and set `GROQ_MODEL` in `.env`.
+If you later see `model not found`, set a supported model with `LLM_MODEL` in `.env`.
 
 The app never crashes at import time when the key is missing; it returns a clear
 **500** with an explanatory message at request time instead. `GET /health` reports
@@ -169,7 +170,7 @@ curl -X POST http://localhost:8000/api/analyze \
 | ---- | --------------------------------------------------------------------------- |
 | 400  | Empty `trial_url` / `patient_text`, or a failed trial-URL fetch              |
 | 422  | Submitted text still contains direct identifiers: refused, not forwarded    |
-| 500  | `GROQ_API_KEY` not configured on the server                                 |
+| 500  | No configured model API key is available on the server                       |
 | 502  | LLM call failed, or its JSON did not validate against `ClinixPathPayload`    |
 
 Pipeline order is input validation → identifier screen → trial fetch → AI, so bad input
@@ -191,7 +192,8 @@ plus the surrounding constraints the criteria block usually omits (phase, min/ma
 sex, healthy-volunteer flag): with none of the page chrome a scraper would drag in.
 Less noise into the prompt means a cleaner matrix out.
 
-`GROQ_API_KEY` is the only credential this service needs.
+No credential is required to retrieve trial criteria; `OPENAI_API_KEY` is required
+for the primary analysis provider.
 
 ---
 

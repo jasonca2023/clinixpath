@@ -632,8 +632,228 @@ def _plumbing_checks(main):
         for model in (main.ClinixPathPayload, main.DiscoveryPayload):
             assert "truncation" in model.model_fields, model.__name__
 
+    def a_stated_reset_window_is_waited_out():
+        """
+        A 429 carries the reset the provider named, and the retry honours it.
+
+        The number was living only inside the message string: Groq answered
+        "resets in about 18 seconds" and `_score_one_trial` slept a flat 2.0, so
+        the retry hit the same closed window. Three of four trials on a measured
+        run failed that way and every one scored fine when re-sent by hand.
+        """
+        limited = main.ProviderRateLimited("groq rate limit reached", retry_after=18)
+        assert main._retry_after_of(limited) == 18
+
+        # It has to survive the chain's aggregate, which is what the retry sees.
+        aggregate = RuntimeError("All 2 configured providers failed — groq: ...")
+        aggregate.retry_after = 18
+        assert main._retry_after_of(aggregate) == 18
+
+        # And the prose form, for an error re-wrapped on the way up.
+        assert main._retry_after_of(
+            RuntimeError("groq rate limit reached (HTTP 429). Resets in about 7 seconds.")
+        ) == 7
+
+        # A DAILY cap reports no wait: no single run outlasts one.
+        assert main._retry_after_of(RuntimeError("no numbers here")) == 0
+
+        # And the delay must GROW with what was asked for. Asserting the source
+        # does not say `sleep(2.0)` was too weak — it passed against a rewrite
+        # that assigned 2.0 to a variable first. This tests the behaviour.
+        assert main._retry_delay(18) == 18, "a stated 18s wait is not honoured"
+        assert main._retry_delay(0) == 2.0, "no stated wait should still pause"
+        assert main._retry_delay(3) == 3
+        # Capped, so an hours-long daily cap cannot stall a run.
+        assert main._retry_delay(9999) == main.MAX_RETRY_WAIT_SECONDS
+        # Never past the run's remaining budget.
+        assert main._retry_delay(18, remaining=5) == 5
+        assert main._retry_delay(18, remaining=-1) <= 0, "a spent budget must not sleep"
+
+        # Three attempts, because one retry inside a ~20s refill window is one
+        # retry spent on a bucket that has not refilled yet.
+        assert main.RETRIES_PER_TRIAL >= 3, main.RETRIES_PER_TRIAL
+
+        # The loop has to actually call it.
+        import ast
+        from pathlib import Path
+
+        body = next(
+            n
+            for n in ast.walk(ast.parse(Path(main.__file__).read_text()))
+            if isinstance(n, ast.AsyncFunctionDef) and n.name == "_score_one_trial"
+        )
+        text = ast.unparse(body)
+        assert "_retry_after_of" in text, "_score_one_trial ignores the stated wait"
+        assert "_retry_delay" in text, "_score_one_trial no longer sizes its own wait"
+
+    def one_call_per_bucket_is_not_run_two_at_a_time():
+        """
+        Concurrency cannot exceed what the surviving chain can actually admit.
+
+        A provider declaring `tpm_limit` is charged prompt + max_tokens at
+        request time, and the reservation is sized to whatever is left of the
+        bucket — so one call books all of it and a second is refused, not
+        queued. Running two against such a chain manufactures its own 429s.
+        """
+        real = main._provider_chain
+        try:
+            main._provider_chain = lambda: [{"name": "groq", "tpm_limit": "8000"}]
+            assert main._effective_concurrency() == 1, "a TPM-only chain must serialize"
+
+            # A provider with headroom lifts it again.
+            main._provider_chain = lambda: [
+                {"name": "groq", "tpm_limit": "8000"},
+                {"name": "cloudflare"},
+            ]
+            assert main._effective_concurrency() == main.DISCOVERY_CONCURRENCY
+        finally:
+            main._provider_chain = real
+
+    def an_exhausted_provider_is_stood_down():
+        """
+        A spent DAILY allowance drops out of the chain instead of being redialled.
+
+        Cloudflare answers an exhausted free tier with a plain 429 whose body
+        says "daily free allocation". Every trial in a run was paying a full
+        round-trip to be told that again, and runs hit their time budget with
+        trials still unscored because of it.
+        """
+        main._EXHAUSTED_UNTIL.clear()
+        try:
+            main._mark_exhausted("cloudflare", 3600)
+            assert "cloudflare" in main._EXHAUSTED_TODAY
+            assert "cloudflare" not in [p["name"] for p in main._provider_chain()]
+
+            # It comes BACK once the window passes — a stand-down is not a ban.
+            main._EXHAUSTED_UNTIL["cloudflare"] = main.time.monotonic() - 1
+            assert "cloudflare" not in main._EXHAUSTED_TODAY
+
+            # With EVERY provider out, the chain must not come back empty: there
+            # would be no call to make and so no error to show the clinician.
+            for name in [p["name"] for p in main._provider_chain()]:
+                main._mark_exhausted(name, 3600)
+            assert main._provider_chain(), "an all-exhausted chain went empty"
+        finally:
+            main._EXHAUSTED_UNTIL.clear()
+
+        # Both wordings of a spent daily allowance are recognised. Groq says
+        # "tokens per day (TPD)" and Cloudflare says "daily free allocation";
+        # testing only for "daily" missed Groq and cost 20s of sleep an attempt.
+        class _Resp:
+            def __init__(self, body, headers=None):
+                self.text = body
+                self.headers = headers or {}
+
+            def json(self):
+                raise ValueError("not json")
+
+        assert main._is_daily_cap(_Resp("Rate limit reached ... on tokens per day (TPD)"))
+        assert main._is_daily_cap(_Resp("used up your daily free allocation of 10,000 neurons"))
+        assert main._is_daily_cap(_Resp("", {"x-ratelimit-type": "tokens_per_day"}))
+        # A per-MINUTE bucket must not be mistaken for one: it is waitable.
+        assert not main._is_daily_cap(_Resp("Rate limit reached on tokens per minute (TPM)"))
+
+    def studies_found_but_unscored_is_not_no_match():
+        """
+        "Nothing matched" and "nothing could be scored" are different answers.
+
+        The page showed "No recruiting trials matched — try widening the
+        location" for a San Jose search that found four studies and lost all
+        four to a spent model quota. Widening the location cannot fix a quota,
+        so the advice pointed at the one thing that was not wrong.
+        """
+        assert main._summarize_failures([], 4) == ""
+
+        quota = main._summarize_failures(
+            ["NCT1 (RuntimeError: groq rate limit reached (HTTP 429), daily cap)"], 4
+        )
+        assert "quota" in quota.lower() and "1 of 4 studies" in quota
+
+        minute = main._summarize_failures(
+            ["NCT1 (RuntimeError: groq rate limit reached (HTTP 429))"], 4
+        )
+        assert "per-minute" in minute and "Screen more trials" in minute
+
+        registry = main._summarize_failures(
+            ["NCT1 (HTTPError: 500 for url: https://clinicaltrials.gov/api/v2/x)"], 2
+        )
+        assert "ClinicalTrials.gov" in registry
+
+        # Never a bare count with no cause, whatever the error was.
+        catchall = main._summarize_failures(["NCT1 (ValueError: something odd)"], 3)
+        assert len(catchall) > 40, catchall
+
+        # The field has to exist for any of it to reach the browser.
+        assert "failure_summary" in main.DiscoveryPayload.model_fields
+
+    def an_all_out_chain_says_so_in_one_sentence():
+        """
+        A chain where every provider failed the same way collapses to one line.
+
+        The aggregate is written for a log and lands verbatim in a dialog: ~600
+        characters, two reset windows and two copies of "Set LLM_PROVIDER in
+        backend/.env", around the single fact that there is no model capacity
+        until a quota resets.
+        """
+        # Verbatim from a measured run, because the length is the whole point.
+        both_daily = RuntimeError(
+            "All 2 configured providers failed — groq: groq rate limit reached "
+            "(HTTP 429). Resets in about 24 minutes. This is a per-model daily "
+            "cap, so a different provider gives a fresh allowance immediately. "
+            "Configured and still usable: cloudflare. Set LLM_PROVIDER in "
+            "backend/.env. | cloudflare: cloudflare rate limit reached (HTTP "
+            "429). Resets in an unknown period. This is a per-model daily cap, "
+            "so a different provider gives a fresh allowance immediately. Every "
+            "configured provider is out for today; add another key to "
+            "backend/.env, or wait for the reset."
+        )
+        condensed = main._condense_chain_error(both_daily)
+        assert len(condensed) < len(str(both_daily)) / 2, len(condensed)
+        assert "today" in condensed and "backend/.env" in condensed
+        # None of the log-shaped detail survives into the dialog.
+        assert "HTTP 429" not in condensed and "LLM_PROVIDER" not in condensed
+
+        both_minute = RuntimeError(
+            "All 2 configured providers failed — groq: groq rate limit reached "
+            "(HTTP 429). tokens per minute | cloudflare: rate limit reached, "
+            "tokens per minute"
+        )
+        assert "about a minute" in main._condense_chain_error(both_minute)
+
+        # A MIXED chain keeps its detail: that is what makes it diagnosable.
+        mixed = RuntimeError(
+            "All 2 configured providers failed — groq: groq rate limit reached "
+            "(HTTP 429). daily | cloudflare: cloudflare returned HTTP 401: bad key"
+        )
+        assert "401" in main._condense_chain_error(mixed)
+
+        # And a single-provider error is passed through untouched.
+        solo = RuntimeError("groq returned HTTP 401: invalid api key")
+        assert main._condense_chain_error(solo) == str(solo)
+
+    def a_failure_summary_quotes_no_provider_text():
+        """
+        The sentence shown to a clinician is built from OUR phrases, never theirs.
+
+        `failed` carries raw exception text. A summary that echoed it would put
+        a provider's response body — and on the search path, the derived query
+        with the patient's biomarkers in it — onto the page.
+        """
+        secret = "PD-L1 65% KRAS G12C stage IV adenocarcinoma"
+        summary = main._summarize_failures(
+            [f"NCT1 (HTTPError: 500 for url: https://x/?query.term={secret})"], 1
+        )
+        for leak in ("PD-L1", "KRAS", "G12C", "adenocarcinoma", "query.term"):
+            assert leak not in summary, f"{leak!r} leaked into {summary!r}"
+
     return [
         ("empty matrix is not a pass", empty_matrix_is_not_a_pass),
+        ("a stated reset window is waited out", a_stated_reset_window_is_waited_out),
+        ("one call per bucket is not run two at a time", one_call_per_bucket_is_not_run_two_at_a_time),
+        ("an exhausted provider is stood down", an_exhausted_provider_is_stood_down),
+        ("studies found but unscored is not no match", studies_found_but_unscored_is_not_no_match),
+        ("an all-out chain says so in one sentence", an_all_out_chain_says_so_in_one_sentence),
+        ("a failure summary quotes no provider text", a_failure_summary_quotes_no_provider_text),
         ("JSON survives a preamble", json_survives_a_preamble),
         ("malformed JSON still fails", malformed_json_still_fails),
         ("internal hosts are unreachable", internal_hosts_are_unreachable),
