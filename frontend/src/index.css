@@ -1,0 +1,543 @@
+@import './../tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  /* Gate 34: never `hidden`; `clip` prevents accidental scroll containers. */
+  html,
+  body {
+    overflow-x: clip;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink-2);
+    font-family: var(--font-body);
+    /* The scale declares a 15px base, but nothing applied it, so every element
+       without an explicit size fell through to the browser's 16px — an eighth
+       step that exists in no token and shows up in the rendered page as a size
+       the design never chose. */
+    font-size: var(--text-base);
+    -webkit-font-smoothing: antialiased;
+    /* `cv02`/`cv03`/`cv04`/`ss01` are Inter's character variants and do nothing
+       on IBM Plex Sans. `tnum` was applied globally, which forced tabular
+       figures into running prose; it belongs on `.value`, where it already is. */
+    font-feature-settings: 'kern', 'liga';
+    text-rendering: optimizeLegibility;
+    transition:
+      background-color var(--dur-mid) var(--ease-out),
+      color var(--dur-mid) var(--ease-out);
+  }
+
+  /* No page texture. The radial wash + grid overlay an earlier build carried was
+     atmosphere borrowed from a genre this product is not in, and it fought
+     legibility in light mode. Structure comes from surfaces and rules instead. */
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-style: normal; /* gate 38a: display type is always roman */
+    color: var(--color-ink);
+    letter-spacing: -0.022em;
+    /* gate 51: long clinical terms must break rather than overflow */
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  ::selection {
+    background: var(--color-accent-soft);
+    color: var(--color-ink);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-rule-strong);
+    border: 2px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+}
+
+@layer components {
+  /* Section label. Small tracked caps in the TEXT face, not monospace: mono
+     labels are a terminal convention and were the loudest dev-tool tell in the
+     previous build. Monospace here is reserved for measured values. */
+  .eyebrow {
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--color-ink-3);
+  }
+
+  /* Measured value: tabular figures so a column of results aligns. */
+  .value {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+    color: var(--color-ink);
+  }
+
+  /* SURFACES LIFT AGAIN — reversing the all-transparent voice.
+   *
+   * The previous build made every container a bare top rule on the page ground,
+   * reasoning that a clinical report is ruled, not carded. On paper that is true.
+   * On screen it removed the only cue that separates one block of content from
+   * the next, so the console read as a single undifferentiated column of grey
+   * text with occasional lines through it — no figure, no ground, nowhere for the
+   * eye to land. "Calm" and "flat" are not the same thing, and the page had
+   * shipped the second one.
+   *
+   * A surface now has a fill, a hairline, a radius and a small shadow. The
+   * distinction the rules used to carry is still carried — by SHADOW DEPTH, which
+   * is a scale here exactly as rule weight was: inset < panel < instrument. */
+  .panel {
+    background: var(--color-paper-inset);
+    border: var(--rule) solid var(--color-rule);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* A block WITHIN a panel. Recessed rather than raised, so nesting reads as
+     depth into the page and never as a card stacked on a card. */
+  .panel-inset {
+    background: var(--color-paper-2);
+    border: var(--rule) solid var(--color-rule);
+    border-radius: var(--radius-md);
+    box-shadow: none;
+  }
+
+  /* The instrument: the audit readout itself. The thing the page exists to
+     deliver, so it is the most raised object on it and the only one that carries
+     the accent — a hairline top edge, the way a document marks its own key
+     section. Everything else defers to it. */
+  .instrument {
+    position: relative;
+    background: var(--color-paper-inset);
+    border: var(--rule) solid var(--color-rule);
+    border-top: var(--rule-instrument) solid var(--color-accent);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-raised);
+    color: var(--color-ink);
+  }
+
+  /* ---- dialogs ------------------------------------------------------------
+   *
+   * A dialog is NOT a block of the document — it floats above it, and it is the
+   * one place a raised surface is honest, so it keeps a fill, a border, a radius
+   * and a shadow while the page below keeps none of them.
+   *
+   * This exists because making `.panel` transparent broke both overlays at once.
+   * They had been using `.panel` for their surface, so they inherited a fill and
+   * a border for free; the moment the page stopped needing those, the review
+   * dialog and the source viewer became see-through sheets of text floating over
+   * a blurred console with nothing behind them. An in-document container and a
+   * floating one are different jobs and should never have shared a class.
+   *
+   * The fill is `--color-paper`, not `--color-paper-inset`: it has to read as
+   * opaque against a blurred backdrop, and it must not be defeated by any alpha.
+   */
+  .dialog {
+    background: var(--color-paper);
+    border: var(--rule) solid var(--color-rule-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    color: var(--color-ink);
+  }
+
+  /* A section label sitting against its rule. Small, tracked, in the margin of
+     the block it names — the way a report labels a table, not the way a card
+     wears a title bar. */
+  /* Now that a block has a fill, its label is a header ROW inside that surface
+     rather than a caption floating above a rule — so it takes the surface's
+     horizontal padding and a divider beneath it. */
+  /* Now that a block has a fill, its label is a header ROW inside that surface
+     rather than a caption floating above a rule — so it takes the surface's
+     horizontal padding and a divider beneath it.
+     The inline value is --space-md, NOT --space-lg, because the components that
+     sit inside these surfaces (the gap rows, the matrix rows, the trial cards)
+     were all written to `px-4`. At --space-lg the header indented half a rem
+     further than its own content, which reads as a misalignment rather than as
+     a deliberate hang. One value, matching what the content already uses. */
+  .block-label {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    border-bottom: var(--rule) solid var(--color-rule);
+  }
+
+  /* The content well of a surface. Pairs with `.block-label` above it. */
+  .panel-body {
+    padding: var(--space-md);
+  }
+
+  /* Light divider between rows inside a block. */
+  .row-rule {
+    border-top: var(--rule) solid var(--color-rule);
+  }
+
+  .btn-primary {
+    background: var(--color-accent);
+    color: var(--color-accent-ink);
+    border-radius: var(--radius-md);
+    font-weight: 500;
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      transform var(--dur-fast) var(--ease-out);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: var(--color-accent-hover);
+  }
+
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-quiet {
+    background: transparent;
+    color: var(--color-ink-2);
+    border: var(--rule) solid var(--color-rule-strong);
+    border-radius: var(--radius-md);
+    font-weight: 500;
+    transition:
+      border-color var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
+  }
+
+  .btn-quiet:hover:not(:disabled) {
+    border-color: var(--color-accent);
+    color: var(--color-ink);
+  }
+
+  .field {
+    background: var(--color-paper-inset);
+    border: var(--rule) solid var(--color-rule-strong);
+    border-radius: var(--radius-md);
+    color: var(--color-ink);
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+
+  .field::placeholder {
+    color: var(--color-ink-3);
+    opacity: 0.75;
+  }
+
+  /* Was `--color-rule-strong`, identical to the default border, so hovering a
+     field changed nothing. Steps toward the accent without reaching it, leaving
+     the full accent to mean "focused". */
+  .field:hover:not(:disabled) {
+    border-color: var(--color-ink-3);
+  }
+
+  .field:focus {
+    outline: none;
+    border-color: var(--color-accent);
+  }
+
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    background: var(--color-paper-3);
+  }
+
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    animation: shimmer 1.6s infinite;
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      var(--color-paper-2),
+      transparent
+    );
+  }
+}
+
+@layer components {
+  /* ---- entrance primitives -------------------------------------------
+   * Three only, used everywhere, so the whole app moves with one vocabulary.
+   * transform + opacity exclusively: animating height/top forces layout on
+   * every frame and is what makes a UI feel cheap rather than smooth.
+   */
+
+  /* Scrim behind any modal. */
+  .enter-scrim {
+    animation: scrim-in var(--dur-slow) var(--ease-out) both;
+  }
+
+  /* Dialog panel. Rises a few px and settles; no scale bounce, because an
+     overshoot on a clinical confirmation reads as playful. */
+  .enter-dialog {
+    /* Delayed a beat behind the scrim so the page dims first and the panel
+       arrives into an already-settled backdrop. */
+    animation: dialog-in 320ms var(--ease-out) 70ms both;
+  }
+
+  /* Content that arrives after a request or a disclosure opens. */
+  .progress-enter {
+    animation: progress-in var(--dur-slow) var(--ease-out) both;
+  }
+
+
+  /* The read head. A single hairline travelling down the stack, which is the
+     part the previous version was missing: every row animated on its own timer,
+     so five things eased in and out at once and the whole panel read as a static
+     diagram breathing. One moving object, crossing rows in order, is legible as
+     PROGRESS — the eye tracks it and knows where the work is. */
+
+  /* A faint band trailing the head, so the direction of travel is unambiguous. */
+
+
+  /* The two sides of a comparison. Unread until the head reaches them. */
+
+
+
+  /* The join between them. */
+
+  /* The verdict, landing as the head passes. `steps(1, end)` on the row above
+     and an eased pop here: the state change is instant (a row is decided or it
+     is not) while the mark itself still arrives with some weight. */
+
+  .enter-content {
+    animation: content-in var(--dur-slow) var(--ease-out) both;
+  }
+
+  /* Smooth open/close without animating height: the row collapses via
+     grid-template-rows, which the compositor can interpolate. */
+  .disclose {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--dur-mid) var(--ease-out);
+  }
+
+  /* `visibility: hidden` is what actually takes collapsed content out of play.
+     Collapsing the grid track hides it visually but leaves every control inside
+     focusable, measurable and readable by a screen reader: tabbing past a closed
+     group walked into buttons and text inputs that were not on screen, and the
+     browser scrolled to them. Height alone is not concealment.
+
+     It is delayed rather than immediate so the close still animates. On open the
+     delay is dropped, so content is visible for the whole expand. Under reduced
+     motion the global `transition-duration` override collapses the delay and the
+     content simply hides at once, which is the right result there. */
+  .disclose > * {
+    overflow: hidden;
+    min-height: 0;
+    visibility: hidden;
+    transition: visibility 0s linear var(--dur-mid);
+  }
+
+  .disclose[data-open='true'] {
+    grid-template-rows: 1fr;
+  }
+
+  .disclose[data-open='true'] > * {
+    visibility: visible;
+    transition-delay: 0s;
+  }
+
+  /* Partial disclosure: a block that collapses to a few lines rather than to
+     nothing, for a long criterion quote that should preview before it expands.
+     `.disclose` cannot do this job — grid-template-rows interpolates 0fr↔1fr,
+     and "two lines tall" is neither, so there is nothing for the compositor to
+     tween. max-height is the honest trade: it animates in both directions, and
+     the only artifact is that a short block finishes opening early, which is
+     invisible at 200ms. It replaced a `line-clamp` toggle, which snapped. */
+  .clamp {
+    overflow: hidden;
+    max-height: 3.3em; /* two lines at leading-relaxed */
+    transition: max-height var(--dur-mid) var(--ease-out);
+  }
+
+  .clamp[data-open='true'] {
+    max-height: 40em;
+  }
+}
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The progress panel animating IN. It replaces the intake, so it arrives from
+   slightly below and scales a hair — enough to read as "the page moved to the
+   next step", not as decoration. */
+@keyframes progress-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes content-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .disclose {
+    transition: none !important;
+  }
+
+
+
+
+}
+
+@layer components {
+  /* The active-stage mark. A small filled square that breathes — not a spinner.
+     A spinner is the universal "something is happening and I cannot tell you
+     what", and this page can tell you what: the stage is named beside it. */
+  .stage-mark {
+    width: 9px;
+    height: 9px;
+    border-radius: 1px;
+    background: var(--color-ink);
+  }
+
+  .stage-mark.is-live {
+    animation: mark-breathe 1.8s var(--ease-in-out) infinite;
+  }
+
+  /* A hairline creeping along the running stage's own rule. Indeterminate: it
+     travels and resets rather than filling toward a total, because the backend
+     reports no progress and a bar reaching 100%% would be a lie. */
+  /* Clipped by the row, and moved with a transform.
+   *
+   * It animated `left` from 0 to 100%, which put it past the row's right edge
+   * on every cycle. `overflow-y: auto` with a visible x-axis is invalid CSS —
+   * the spec computes the other axis to `auto` too — so the parent had quietly
+   * become horizontally scrollable, the overhang raised a horizontal scrollbar,
+   * the scrollbar ate vertical space, and the centred content re-centred. The
+   * page rocked up and down once per 2.6s cycle with nobody touching it.
+   *
+   * `transform` rather than `left`/`width` because those two are layout
+   * properties: the old version forced a reflow on every frame of an infinite
+   * loop, for a decorative hairline. */
+  .stage-crawl {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 2px;
+    width: 30%;
+    background: var(--color-ink);
+    opacity: 0.55;
+    animation: crawl 2.6s var(--ease-in-out) infinite;
+  }
+}
+
+@keyframes mark-breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.82); }
+}
+
+@keyframes crawl {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(333%); }
+}
+
+/* The search page is locked to the viewport: a run is a state you wait in, and
+ * there is nothing below the fold to reach. The page itself never scrolls — the
+ * container is 100dvh with overflow hidden and the body is held still for the
+ * duration of the run.
+ *
+ * This one region still yields if the content genuinely cannot fit, rather than
+ * clipping. "Unscrollable" plus content taller than the window equals content
+ * nobody can ever read, and the two things at the bottom are the cancel button
+ * and the privacy note — exactly what someone on a short window needs most. In
+ * practice it never triggers; it is the floor, not the layout.
+ */
+.progress-screen {
+  overflow-y: auto;
+  /* `clip`, not `visible`: a visible x-axis next to an auto y-axis is computed
+     to `auto` by the spec, which is how a decorative overhang turned this into
+     a horizontally scrollable region. `clip` keeps the axis un-scrollable. */
+  overflow-x: clip;
+  overscroll-behavior: contain;
+
+  /* NO VISIBLE SCROLLBAR.
+   *
+   * The track is chrome for a page that is meant to read as a single still
+   * frame, and the app draws a fairly heavy thumb globally, so a few pixels of
+   * overflow put a full-height grey line down the side of an otherwise empty
+   * screen.
+   *
+   * Hidden rather than switched to `overflow: hidden`, because those are not
+   * the same promise: hiding the BAR keeps the content reachable by wheel or
+   * keyboard on a short window, where clipping would put the cancel button and
+   * the privacy note permanently out of reach. */
+  scrollbar-width: none;
+}
+
+.progress-screen::-webkit-scrollbar {
+  display: none;
+}

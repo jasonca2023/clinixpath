@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="ClinixPath">
+  <!-- ClinixPath · favicon · theme: custom "Casebook"
+       The in-app mark, drawn heavier for 16px: a bracket that does not close,
+       with a path stepping through it. The bracket is the protocol; the path is
+       the patient being carried through its criteria.
+
+       Colours are LITERAL, not tokens: a favicon renders in browser chrome that
+       cannot see our custom properties, and it has to hold on both a light and a
+       dark tab strip. -->
+  <rect width="32" height="32" rx="4" fill="#F2EFE9"/>
+  <path d="M11 5H6v22h5" fill="none" stroke="#231F1A" stroke-width="3.25"
+        stroke-linecap="square" stroke-linejoin="miter"/>
+  <path d="M21 5h5v22h-5" fill="none" stroke="#231F1A" stroke-width="3.25"
+        stroke-linecap="square" stroke-linejoin="miter"/>
+  <path d="M9 21h4l3-9 3 5h4" fill="none" stroke="#231F1A" stroke-width="2.75"
+        stroke-linecap="square" stroke-linejoin="miter"/>
+</svg>

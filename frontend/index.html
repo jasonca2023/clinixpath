@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#1B5480" />
+    <meta
+      name="description"
+      content="ClinixPath finds the recruiting clinical trials a patient can actually join. Records are de-identified in your browser before anything is transmitted."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <title>ClinixPath · Clinical Trial Eligibility Console</title>
+
+    <script>
+      // Resolve the theme before first paint. Without this the page renders in the
+      // default band for one frame and flashes when React applies the real choice.
+      (function () {
+        try {
+          var saved = localStorage.getItem('clinixpath.theme');
+          if (saved === 'light' || saved === 'dark') {
+            document.documentElement.setAttribute('data-theme', saved);
+          }
+          // No saved choice: leave the attribute off so the prefers-color-scheme
+          // block in tokens.css governs and the OS wins.
+        } catch (e) {
+          /* storage blocked (private mode / embedded); OS preference wins */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
