@@ -1,0 +1,34 @@
+# Render blueprint for the ClinixPath API.
+#
+# The frontend is NOT here: it is a static bundle on Cloudflare Pages, and the
+# two halves are joined by exactly two settings — ALLOWED_ORIGINS below, which
+# names the Pages domain, and VITE_API_BASE_URL on the Pages side, which names
+# this service. Change one without the other and every request fails CORS.
+services:
+  - type: web
+    name: clinixpath-api
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    # --host 0.0.0.0 is correct HERE and wrong on a laptop: inside a container it
+    # binds the only interface there is, and Render routes $PORT to it. The
+    # `__main__` block in main.py defaults to loopback for the opposite reason.
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      # Set in the dashboard, never here. A blueprint is committed to a public
+      # repository; `sync: false` is what keeps the key out of it.
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LLM_PROVIDER
+        value: openai
+      - key: ALLOWED_ORIGINS
+        sync: false
+      # The free instance sleeps after inactivity and takes ~50s to wake. One
+      # trial at a time keeps a cold wake from fanning out into parallel model
+      # calls that all time out together.
+      - key: DISCOVERY_CONCURRENCY
+        value: "1"

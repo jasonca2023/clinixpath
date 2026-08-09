@@ -1,6 +1,17 @@
-fastapi
-uvicorn[standard]
-python-multipart
-python-dotenv
-requests
-pydantic
+# Pinned to the versions this was built and tested against.
+#
+# These were unpinned, which is fine on a laptop that already has a working
+# virtualenv and not fine on a host that resolves them fresh on every deploy: a
+# breaking release of any one of them turns the next build into a red deploy at
+# the worst possible moment, with a traceback that has nothing to do with the
+# commit that triggered it.
+#
+# uvicorn[standard] pulls httptools and uvloop, which are compiled — pinning them
+# is what keeps a rebuild from picking a wheel that does not exist for the host's
+# Python.
+fastapi==0.140.7
+uvicorn[standard]==0.51.0
+python-multipart==0.0.32
+python-dotenv==1.2.2
+requests==2.34.2
+pydantic==2.13.4

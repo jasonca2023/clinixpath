@@ -31,7 +31,8 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from html import unescape
 from html.parser import HTMLParser
-from typing import Any, Dict, List, Literal, Optional
+from collections import OrderedDict, deque
+from typing import Any, Deque, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -862,6 +863,103 @@ app.add_middleware(
     allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+# --- rate limiting ----------------------------------------------------------
+#
+# CORS IS NOT A GUARD. It is enforced by browsers, so it stops a page the
+# clinician visits from posting here and stops nothing else: a deployed instance
+# has a public URL, no authentication, and a metered model key behind it, and
+# `curl` never asks a browser for permission. Without this, one loop against that
+# URL spends the whole OpenAI balance.
+#
+# Deliberately per-IP and in-memory. This service keeps no database by design, and
+# a counter that dies with the process is the right trade here: the cost of losing
+# it on a restart is that a caller gets a fresh allowance, which is exactly what a
+# restart should do anyway. It is a spend guard, not an access control.
+RATE_LIMIT_REQUESTS = _env_int("RATE_LIMIT_REQUESTS", 20)
+RATE_LIMIT_WINDOW_SECONDS = _env_int("RATE_LIMIT_WINDOW_SECONDS", 3600)
+# Bounded so a flood of spoofed forwarding headers cannot grow this dict without
+# limit. At the cap the oldest bucket is dropped, which costs that caller its
+# history and never costs the process its memory.
+RATE_LIMIT_MAX_TRACKED = _env_int("RATE_LIMIT_MAX_TRACKED", 8192)
+
+# Only the endpoints that SPEND. /health has to stay free or the platform's own
+# health check throttles the service into a restart loop.
+_METERED_PATHS = ("/api/discover", "/api/discover/stream", "/api/analyze")
+
+_rate_buckets: "OrderedDict[str, Deque[float]]" = OrderedDict()
+
+
+def _client_ip(request: Request) -> str:
+    """
+    The caller's address, as far as it can be trusted behind a platform proxy.
+
+    Reads the RIGHTMOST entry of X-Forwarded-For, not the leftmost. The leftmost
+    is whatever the client claimed and is trivially forged — a script sending a
+    fresh fake value per request would get an unlimited allowance from a limiter
+    that believed it. Each proxy APPENDS the peer it actually saw, so the last
+    entry is the one written by infrastructure rather than by the caller.
+    """
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+        if hops:
+            return hops[-1]
+    return request.client.host if request.client else "unknown"
+
+
+def _over_rate_limit(ip: str) -> bool:
+    """Record a hit for `ip`; True when it has spent its allowance."""
+    now = time.monotonic()
+    cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+
+    hits = _rate_buckets.get(ip)
+    if hits is None:
+        hits = deque()
+        _rate_buckets[ip] = hits
+    while hits and hits[0] < cutoff:
+        hits.popleft()
+
+    # Touched last so the cap below evicts the least recently ACTIVE caller.
+    _rate_buckets.move_to_end(ip)
+    while len(_rate_buckets) > RATE_LIMIT_MAX_TRACKED:
+        _rate_buckets.popitem(last=False)
+
+    if len(hits) >= RATE_LIMIT_REQUESTS:
+        return True
+    hits.append(now)
+    return False
+
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    """Cap how often one address can reach the endpoints that cost money."""
+    if request.method != "OPTIONS" and request.url.path in _METERED_PATHS:
+        ip = _client_ip(request)
+        if _over_rate_limit(ip):
+            minutes = max(1, RATE_LIMIT_WINDOW_SECONDS // 60)
+            log.info("ratelimit %s exceeded %d/%ds", ip, RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW_SECONDS)
+            origin = request.headers.get("origin", "")
+            return JSONResponse(
+                status_code=429,
+                # Echoed so the browser can READ this instead of reporting a bare
+                # "Failed to fetch" — same reason as the exception handler below.
+                headers=(
+                    {"Access-Control-Allow-Origin": origin}
+                    if origin in ALLOWED_ORIGINS
+                    else {}
+                ),
+                content={
+                    "detail": (
+                        f"This deployment allows {RATE_LIMIT_REQUESTS} screening "
+                        f"runs per {minutes} minutes from one address, because "
+                        "each run spends a metered model budget. Try again later, "
+                        "or run it locally — see the README."
+                    )
+                },
+            )
+    return await call_next(request)
 
 
 @app.exception_handler(Exception)

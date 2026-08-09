@@ -831,6 +831,68 @@ def _plumbing_checks(main):
         solo = RuntimeError("groq returned HTTP 401: invalid api key")
         assert main._condense_chain_error(solo) == str(solo)
 
+    def spend_is_capped_per_caller():
+        """
+        The metered endpoints are rate-limited, and the limit cannot be spoofed.
+
+        CORS is not a guard: it is enforced by browsers, so a deployed instance
+        with a public URL, no authentication and a metered model key is one
+        `curl` loop away from a spent balance.
+
+        The forwarding header is the part that is easy to get wrong. Each proxy
+        APPENDS the peer it saw, so the RIGHTMOST entry is written by
+        infrastructure; the leftmost is whatever the caller claimed. A limiter
+        that keys on the leftmost hands out a fresh allowance to anyone willing
+        to change one header per request, which is worse than no limiter at all
+        because it looks like protection.
+        """
+        class Req:
+            def __init__(self, xff=None, host="9.9.9.9"):
+                self.headers = {"x-forwarded-for": xff} if xff else {}
+                self.client = type("C", (), {"host": host})()
+
+        assert main._client_ip(Req()) == "9.9.9.9"
+        assert main._client_ip(Req("203.0.113.7")) == "203.0.113.7"
+        assert main._client_ip(Req("1.2.3.4, 203.0.113.7")) == "203.0.113.7", (
+            "a forged leading hop is being trusted"
+        )
+
+        saved_limit = main.RATE_LIMIT_REQUESTS
+        saved_cap = main.RATE_LIMIT_MAX_TRACKED
+        try:
+            main.RATE_LIMIT_REQUESTS = 3
+            main._rate_buckets.clear()
+            assert [main._over_rate_limit("a") for _ in range(5)] == [
+                False, False, False, True, True,
+            ]
+            # A second caller has its own allowance.
+            assert main._over_rate_limit("b") is False
+
+            # Changing only the forged hop must NOT buy a fresh allowance.
+            main._rate_buckets.clear()
+            spoofed = [
+                main._over_rate_limit(main._client_ip(Req(f"10.0.0.{i}, 203.0.113.7")))
+                for i in range(5)
+            ]
+            assert spoofed == [False, False, False, True, True], spoofed
+
+            # And the table cannot be grown without bound by varying the address.
+            main.RATE_LIMIT_MAX_TRACKED = 50
+            main._rate_buckets.clear()
+            for i in range(500):
+                main._over_rate_limit(f"ip-{i}")
+            assert len(main._rate_buckets) <= 50, len(main._rate_buckets)
+        finally:
+            main.RATE_LIMIT_REQUESTS = saved_limit
+            main.RATE_LIMIT_MAX_TRACKED = saved_cap
+            main._rate_buckets.clear()
+
+        # The platform's own health check must never be throttled, or the service
+        # fails its probe and is restarted into a loop.
+        assert "/health" not in main._METERED_PATHS
+        for path in ("/api/discover", "/api/discover/stream", "/api/analyze"):
+            assert path in main._METERED_PATHS, path
+
     def a_failure_summary_quotes_no_provider_text():
         """
         The sentence shown to a clinician is built from OUR phrases, never theirs.
@@ -853,6 +915,7 @@ def _plumbing_checks(main):
         ("an exhausted provider is stood down", an_exhausted_provider_is_stood_down),
         ("studies found but unscored is not no match", studies_found_but_unscored_is_not_no_match),
         ("an all-out chain says so in one sentence", an_all_out_chain_says_so_in_one_sentence),
+        ("spend is capped per caller", spend_is_capped_per_caller),
         ("a failure summary quotes no provider text", a_failure_summary_quotes_no_provider_text),
         ("JSON survives a preamble", json_survives_a_preamble),
         ("malformed JSON still fails", malformed_json_still_fails),
