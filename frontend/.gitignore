@@ -13,3 +13,6 @@ yarn-error.log*
 .idea
 .vscode/*
 !.vscode/extensions.json
+
+# Vite dev-server output. Committed once by accident.
+dev.log

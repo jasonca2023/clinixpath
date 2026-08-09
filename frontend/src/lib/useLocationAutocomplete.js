@@ -1,6 +1,19 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 
-const API_KEY = "dd34473a5f7e486db146e5d16f92d368";
+// Read from the environment, never inlined here. A literal in this file is a
+// literal in the published bundle AND in a public repository: this key was
+// committed and pushed, so it must be treated as burned and rotated — removing
+// it from HEAD does not remove it from the branch history that already carries
+// it.
+//
+// Geoapify keys are client-side by design (the browser has to send one), so the
+// real protection is a domain restriction plus the daily quota on the key
+// itself. An unrestricted key in a public repo has neither, and the quota is
+// what runs out first.
+//
+// Absent, the hook already degrades to no suggestions — see the guard below —
+// so a clone with no key gets a plain text field rather than a broken one.
+const API_KEY = import.meta.env.VITE_GEOAPIFY_API_KEY ?? "";
 
 export function useLocationAutocomplete(value) {
   const [suggestions, setSuggestions] = useState([]);
