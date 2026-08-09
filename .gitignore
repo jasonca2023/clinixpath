@@ -1,0 +1,20 @@
+# Secrets. backend/.env holds live provider API keys.
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Node
+node_modules/
+dist/
+*.local
+
+# Eval cache: model responses, keyed by prompt hash.
+backend/eval/.cache/
+
+# OS
+.DS_Store
