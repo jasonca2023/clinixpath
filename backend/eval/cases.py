@@ -317,6 +317,85 @@ def _plumbing_checks(main):
                 f"{called} at line {node.lineno} has no asyncio.wait_for around it"
             )
 
+    def shrinking_stops_when_it_changes_nothing():
+        """
+        The context-overflow retry must not re-send an identical prompt.
+
+        `_fit_record` returns a record untouched when it already fits, so halving
+        a limit the record is nowhere near produces byte-identical output. When
+        the CRITERIA are what overflowed — the loop does not shrink those — a
+        3,000-character record against 25,000 characters of criteria sent the
+        same 36,405-character prompt four times and paid for four rejections.
+        """
+        sent = []
+
+        def always_overflows(prompt, system=main.SYSTEM_MESSAGE):
+            sent.append(len(prompt))
+            raise RuntimeError("provider returned HTTP 400: maximum context length exceeded")
+
+        original = main._generate_structured_payload
+        main._generate_structured_payload = always_overflows
+        try:
+            try:
+                main._generate_with_shrink("x" * 3000, "y" * 25000)
+            except RuntimeError:
+                pass
+            assert len(sent) == 1, f"re-sent an identical prompt {len(sent)} times"
+
+            # A record that genuinely is too large must still walk the ladder.
+            sent.clear()
+            try:
+                main._generate_with_shrink("x" * 130_000, "y" * 1000)
+            except RuntimeError:
+                pass
+            assert len(sent) > 1, "an oversized record stopped shrinking too early"
+            assert len(set(sent)) == len(sent), f"ladder repeated a size: {sent}"
+        finally:
+            main._generate_structured_payload = original
+
+    def a_state_abbreviation_does_not_match_everything():
+        """
+        Site relevance matches on word starts, not bare substrings.
+
+        Every US state has a two-letter form, so a substring test made the most
+        ordinary input a wildcard: "Cleveland, OH" matched J-OH-annesburg,
+        C-oh-asset and R-oh-nert Park, and because matches sort first,
+        Johannesburg outranked Cleveland, Ohio for a search naming Cleveland.
+        """
+        def study(*rows):
+            return {"protocolSection": {
+                "identificationModule": {"nctId": "NCT1", "briefTitle": "t"},
+                "contactsLocationsModule": {"locations": [
+                    {"city": c, "state": st, "country": k, "status": "RECRUITING"}
+                    for c, st, k in rows]}}}
+
+        subject = study(
+            ("Johannesburg", "Gauteng", "South Africa"),
+            ("Rohnert Park", "California", "United States"),
+            ("Cohasset", "Massachusetts", "United States"),
+            ("Cleveland", "Ohio", "United States"),
+        )
+        for query in ("Cleveland, OH", "OH", "Ohio"):
+            first = main._summarize_study(subject, query)["locations"][0]
+            assert first == "Cleveland, Ohio", f"{query!r} surfaced {first!r}"
+
+        # The count must include sites that are near AND open. Splitting the
+        # buckets left it reporting only the not-yet-recruiting half, so a trial
+        # whose every local site was open reported zero nearby.
+        assert main._summarize_study(subject, "Ohio")["nearby_count"] == 1
+
+    def the_service_binds_to_loopback():
+        """
+        No authentication, clinical text, and a metered budget: all three were
+        exposed to the local network by a default of 0.0.0.0. CORS does not
+        help — it constrains browsers, and the exposure is any HTTP client.
+        """
+        from pathlib import Path
+        launcher = Path(main.__file__).read_text().split('if __name__ == "__main__"')[-1]
+        assert '"0.0.0.0"' not in launcher.replace('os.environ.get("HOST", "127.0.0.1")', ""), \
+            "the dev launcher binds every interface"
+        assert "127.0.0.1" in launcher, "no loopback default in the launcher"
+
     def a_distant_site_is_still_found():
         """
         Site relevance must scan every location, not just the displayed few.
@@ -560,6 +639,9 @@ def _plumbing_checks(main):
         ("internal hosts are unreachable", internal_hosts_are_unreachable),
         ("every model call is time-bounded", every_model_call_is_time_bounded),
         ("truncation keeps the end of the chart", truncation_keeps_the_end_of_the_chart),
+        ("shrinking stops when it changes nothing", shrinking_stops_when_it_changes_nothing),
+        ("a state abbreviation does not match everything", a_state_abbreviation_does_not_match_everything),
+        ("the service binds to loopback", the_service_binds_to_loopback),
         ("a distant site is still found", a_distant_site_is_still_found),
         ("derived keywords reach the registry", derived_keywords_reach_the_registry),
         ("an over-specific condition still finds trials", an_over_specific_condition_still_finds_trials),
