@@ -847,38 +847,48 @@ def _plumbing_checks(main):
         because it looks like protection.
         """
         class Req:
-            def __init__(self, xff=None, host="9.9.9.9"):
+            def __init__(self, xff=None, host="9.9.9.9", **extra):
                 self.headers = {"x-forwarded-for": xff} if xff else {}
+                self.headers.update(extra)
                 self.client = type("C", (), {"host": host})()
 
         assert main._client_ip(Req()) == "9.9.9.9"
-        assert main._client_ip(Req("8.8.8.8")) == "8.8.8.8"
-        assert main._client_ip(Req("1.2.3.4, 38.122.182.130")) == "38.122.182.130", (
-            "a forged leading hop is being trusted"
+        assert main._client_ip(Req("8.8.8.8", host="10.0.0.2")) == "8.8.8.8"
+        assert main._client_ip(Req("1.2.3.4", **{"cf-connecting-ip": "38.122.182.130"})) == "38.122.182.130", (
+            "the edge header is being ignored in favour of a forgeable chain"
         )
 
-        # THE SHAPE A REAL PLATFORM SENDS. Taking the rightmost hop outright
-        # passed every local test and was wrong in production: measured on the
-        # deployed service, the last hop is 10.27.203.252 — Render's own internal
-        # load balancer — so every caller resolved to one address and shared a
-        # single bucket. Twenty requests from anyone would have throttled
-        # everyone, and nothing on a laptop can reproduce it, because there is no
-        # proxy in front of a laptop.
-        assert main._client_ip(Req("38.122.182.130, 10.27.203.252")) == "38.122.182.130", (
-            "an internal proxy hop is being treated as the caller"
+        # THE CHAIN THE DEPLOYMENT ACTUALLY SENDS, captured from its own logs:
+        #
+        #   38.122.182.130, 104.23.160.113, 10.31.175.104
+        #   ^ the caller    ^ CDN edge      ^ platform LB
+        #
+        # Two earlier versions walked this from the right, on the reasonable
+        # theory that each proxy appends the peer it saw. Both were wrong here,
+        # in opposite and equally invisible ways:
+        #
+        #   - the last hop is a PRIVATE load-balancer address, so every caller
+        #     shared one bucket and twenty requests from anyone throttled the
+        #     whole service
+        #   - the last PUBLIC hop is a CDN edge address that ROTATES per
+        #     request, so almost every request got a fresh bucket and the
+        #     limiter stopped limiting anything
+        #
+        # Neither is reproducible on a laptop; there is no proxy in front of one.
+        # These assertions carry the measured values so that stays true.
+        CF, LB, ME = "104.23.160.113", "10.31.175.104", "38.122.182.130"
+        assert main._client_ip(Req(f"{ME}, {CF}, {LB}", host=LB)) == ME, (
+            "an infrastructure hop is being treated as the caller"
         )
-        # Private hops are skipped, not merely the last one.
-        assert main._client_ip(Req("8.8.4.4, 10.0.0.7, 172.16.0.1")) == "8.8.4.4"
-        # A chain with no public address at all falls back to the socket peer
-        # rather than bucketing everyone under a private address.
-        assert main._client_ip(Req("10.0.0.1, 10.27.203.252")) == "9.9.9.9"
+        # The same caller through a DIFFERENT CDN edge must land in one bucket.
+        assert main._client_ip(Req(f"{ME}, 104.23.160.99, 10.27.203.252", host="10.27.203.252")) == ME, (
+            "a rotating edge address is being used as the key"
+        )
+        # A chain with no routable address falls back to the socket peer rather
+        # than bucketing everyone under a private address.
+        assert main._client_ip(Req("10.0.0.1, 10.27.203.252", host="10.9.9.9")) == "10.9.9.9"
         # Unparseable entries cannot break the walk.
-        assert main._client_ip(Req("not-an-ip, 8.8.4.4, 10.0.0.5")) == "8.8.4.4"
-        # And a forged PUBLIC address still cannot pre-empt the real one, because
-        # the walk runs right to left.
-        assert main._client_ip(
-            Req("8.8.8.8, 38.122.182.130, 10.0.0.1")
-        ) == "38.122.182.130"
+        assert main._client_ip(Req("not-an-ip, 8.8.4.4, 10.0.0.5", host="10.0.0.2")) == "8.8.4.4"
 
         saved_limit = main.RATE_LIMIT_REQUESTS
         saved_cap = main.RATE_LIMIT_MAX_TRACKED
@@ -894,7 +904,7 @@ def _plumbing_checks(main):
             # Changing only the forged hop must NOT buy a fresh allowance.
             main._rate_buckets.clear()
             spoofed = [
-                main._over_rate_limit(main._client_ip(Req(f"10.0.0.{i}, 38.122.182.130")))
+                main._over_rate_limit(main._client_ip(Req(f"10.0.0.{i}", **{"cf-connecting-ip": "38.122.182.130"})))
                 for i in range(5)
             ]
             assert spoofed == [False, False, False, True, True], spoofed

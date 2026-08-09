@@ -930,23 +930,45 @@ def _client_ip(request: Request) -> str:
     The private hops are infrastructure, so the last public address before them
     is the furthest-out machine that infrastructure actually observed.
     """
-    forwarded = request.headers.get("x-forwarded-for", "")
-    hops = [h.strip() for h in forwarded.split(",") if h.strip()]
-    for hop in reversed(hops):
-        if _is_routable(hop):
-            return hop
-
-    # No public address in the chain. Some platforms carry the caller in their
-    # own header instead; these are only consulted once XFF has come up empty,
-    # so a forged one cannot pre-empt a real forwarding chain.
-    for header in ("x-real-ip", "true-client-ip", "cf-connecting-ip"):
+    # 1. The edge's own header, where the edge overwrites whatever the caller
+    #    sent. This is the only source in the list a client cannot forge.
+    for header in ("cf-connecting-ip", "true-client-ip", "x-real-ip"):
         value = request.headers.get(header, "").strip()
         if _is_routable(value):
             return value
 
+    # 2. The peer the server itself resolved. uvicorn's --proxy-headers already
+    #    reads the forwarding chain, and on this deployment it lands on the right
+    #    address where both hand-rolled attempts did not.
+    peer = request.client.host if request.client else ""
+    if _is_routable(peer):
+        return peer
+
+    # 3. Only now parse the chain by hand, LEFT to right. Measured on the
+    #    deployment, the header reads:
+    #
+    #      38.122.182.130, 104.23.160.113, 10.31.175.104
+    #      ^ the caller    ^ CDN edge      ^ platform LB
+    #
+    #    so the caller is FIRST and everything after it is infrastructure. Both
+    #    earlier versions of this function walked from the right on the theory
+    #    that each proxy appends the peer it saw, and both were wrong here in
+    #    different ways: taking the last hop bucketed every caller under one
+    #    private load-balancer address, and taking the last PUBLIC hop bucketed
+    #    them under a CDN edge address that rotates per request, which silently
+    #    stopped limiting anything at all.
+    #
+    #    Left-to-right is forgeable in principle. It is also the last resort
+    #    here, reached only when the edge header is absent and the server could
+    #    not resolve a routable peer, and this is a spend guard rather than an
+    #    access control — a limiter that never fires is the worse failure.
+    for hop in [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",")]:
+        if _is_routable(hop):
+            return hop
+
     # Direct connection (local dev), or a caller genuinely inside a private
     # network. The socket peer is the honest answer for both.
-    return request.client.host if request.client else "unknown"
+    return peer or "unknown"
 
 
 def _over_rate_limit(ip: str) -> bool:
